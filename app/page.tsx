@@ -25,23 +25,88 @@ const initialTasks: Task[] = [
 ];
 
 const navItems = [
-  { label: "Dashboard", icon: "/assets/icon-dashboard.svg" },
-  { label: "Tasks", icon: "/assets/icon-tasks.svg" },
-  { label: "Warehouses", icon: "/assets/icon-box.svg" },
+  { label: "Dashboard", icon: "dashboard" },
+  { label: "Tasks", icon: "tasks" },
+  { label: "Warehouses", icon: "warehouse" },
 ];
 
 const stats = [
-  { label: "Pending Today", value: "02", note: "Across 3 warehouses", tone: "blue", icon: "/assets/icon-clock.svg" },
-  { label: "Complete Today", value: "04", note: "2 completed on time", tone: "green", icon: "/assets/icon-dashboard.svg" },
-  { label: "Delayed", value: "01", note: "Needs your attention", tone: "red", icon: "/assets/icon-danger.svg" },
-  { label: "Stock Request", value: "03", note: "Waiting for approval", tone: "yellow", icon: "/assets/icon-box.svg" },
+  { label: "Pending Today", value: "02", note: "Across 3 warehouses", tone: "blue", icon: "clock" },
+  { label: "Complete Today", value: "04", note: "2 completed on time", tone: "green", icon: "complete" },
+  { label: "Delayed", value: "01", note: "Needs your attention", tone: "red", icon: "danger" },
+  { label: "Stock Request", value: "03", note: "Waiting for approval", tone: "yellow", icon: "box" },
 ];
 
+function LayeredIcon({ kind }: { kind: string }) {
+  if (kind === "warehouse") {
+    return <span className="layered-icon warehouse-icon" aria-hidden="true">
+      <img className="layer-full" src="/assets/icon-warehouse-base.svg" alt="" />
+      <img className="warehouse-ground" src="/assets/icon-warehouse-ground.svg" alt="" />
+      <img className="warehouse-roof" src="/assets/icon-warehouse-roof.svg" alt="" />
+      <img className="warehouse-side warehouse-side--left" src="/assets/icon-warehouse-side.svg" alt="" />
+      <img className="warehouse-side warehouse-side--right" src="/assets/icon-warehouse-side.svg" alt="" />
+      <img className="warehouse-door" src="/assets/icon-warehouse-door.svg" alt="" />
+    </span>;
+  }
+
+  if (kind === "complete") {
+    return <span className="layered-icon complete-icon" aria-hidden="true">
+      <img className="layer-full" src="/assets/icon-complete-base.svg" alt="" />
+      <img className="complete-oval" src="/assets/icon-complete-oval.svg" alt="" />
+      <img className="complete-check" src="/assets/icon-complete-check.svg" alt="" />
+    </span>;
+  }
+
+  if (kind === "theme") {
+    return <span className="layered-icon theme-icon" aria-hidden="true">
+      <img className="layer-full" src="/assets/icon-theme-base.svg" alt="" />
+      <img className="theme-oval" src="/assets/icon-theme-oval.svg" alt="" />
+      <img className="theme-shape" src="/assets/icon-theme-shape.svg" alt="" />
+    </span>;
+  }
+
+  if (kind === "dropdown") {
+    return <span className="layered-icon dropdown-icon" aria-hidden="true">
+      <img className="layer-full" src="/assets/icon-dropdown-base.svg" alt="" />
+      <img className="dropdown-path" src="/assets/icon-dropdown-path.svg" alt="" />
+    </span>;
+  }
+
+  const singleIcons: Record<string, string> = {
+    dashboard: "/assets/icon-dashboard.svg",
+    tasks: "/assets/icon-tasks.svg",
+    clock: "/assets/icon-stat-clock.svg",
+    danger: "/assets/icon-stat-danger.svg",
+    box: "/assets/icon-stat-box.svg",
+  };
+
+  return <img className="single-icon" src={singleIcons[kind]} alt="" />;
+}
+
+function PickupIcon() {
+  return <span className="layered-icon pickup-icon" aria-hidden="true">
+    <img className="pickup-1" src="/assets/icon-pickup-1.svg" alt="" />
+    <img className="pickup-2" src="/assets/icon-pickup-2.svg" alt="" />
+    <img className="pickup-3" src="/assets/icon-pickup-3.svg" alt="" />
+    <img className="pickup-4" src="/assets/icon-pickup-4.svg" alt="" />
+    <img className="pickup-5" src="/assets/icon-pickup-5.svg" alt="" />
+  </span>;
+}
+
+function ContainerIcon() {
+  return <span className="layered-icon container-icon" aria-hidden="true">
+    <img className="layer-full" src="/assets/icon-container-base.svg" alt="" />
+    <img className="container-path" src="/assets/icon-container-path.svg" alt="" />
+    <span className="container-square" />
+  </span>;
+}
+
 function TaskType({ type }: { type: Task["type"] }) {
-  const icon = type === "Delivery" ? "/assets/icon-delivery.svg" : "/assets/icon-box.svg";
   return (
     <span className={`task-type task-type--${type.toLowerCase()}`}>
-      <span className="task-type__icon"><img src={icon} alt="" /></span>
+      <span className="task-type__icon">
+        {type === "Delivery" ? <img src="/assets/icon-delivery.svg" alt="" /> : type === "Pickup" ? <PickupIcon /> : <ContainerIcon />}
+      </span>
       {type}
     </span>
   );
@@ -67,7 +132,7 @@ export default function Home() {
     <main className="dashboard-shell">
       <header className="topbar">
         <a className="brand" href="#overview" aria-label="Amazing Operations home">
-          <img className="brand__mark" src="/assets/logo-mark.svg" alt="" />
+          <span className="brand__mark-wrap"><img className="brand__mark" src="/assets/logo-mark.svg" alt="" /></span>
           <img className="brand__word" src="/assets/logo-wordmark.svg" alt="Amazing Operations" />
         </a>
 
@@ -79,7 +144,7 @@ export default function Home() {
               onClick={() => setActiveNav(item.label)}
               type="button"
             >
-              <img src={item.icon} alt="" />
+              <LayeredIcon kind={item.icon} />
               <span>{item.label}</span>
               {item.label === "Dashboard" ? <span className="nav-count">2</span> : null}
             </button>
@@ -87,12 +152,12 @@ export default function Home() {
         </nav>
 
         <div className="user-actions">
-          <button className="circle-button sun-button" type="button" aria-label="Toggle appearance">☼</button>
-          <button className="circle-button" type="button" aria-label="View notifications"><img src="/assets/icon-bell.svg" alt="" /></button>
+          <button className="circle-button" type="button" aria-label="Toggle appearance"><LayeredIcon kind="theme" /></button>
+          <button className="circle-button" type="button" aria-label="View notifications"><img src="/assets/icon-bell-exact.svg" alt="" /></button>
           <button className="profile-button" type="button" aria-label="Open profile menu">
             <img src="/assets/avatar-ramie.png" alt="Ramie Shelbie" />
             <span><strong>Ramie Shelbie</strong><small>tomashelbie@gmail.com</small></span>
-            <span className="chevron">⌄</span>
+            <span className="chevron"><LayeredIcon kind="dropdown" /></span>
           </button>
         </div>
       </header>
@@ -106,7 +171,7 @@ export default function Home() {
           <div className="date-block" aria-label="Saturday, August 19, 2026">
             <span className="date-number">19</span>
             <span>Sat,<br />August, 2026</span>
-            <span className="chevron">⌄</span>
+            <span className="date-chevron"><LayeredIcon kind="dropdown" /></span>
           </div>
           <button className="primary-button" type="button" onClick={addTask}>
             <img src="/assets/icon-add.svg" alt="" /> Add new task
@@ -117,7 +182,7 @@ export default function Home() {
       <section className="stats-grid" aria-label="Today’s operations summary">
         {stats.map((stat) => (
           <article className="stat-card" key={stat.label}>
-            <div className={`stat-label stat-label--${stat.tone}`}><img src={stat.icon} alt="" /> {stat.label}</div>
+            <div className={`stat-label stat-label--${stat.tone}`}><LayeredIcon kind={stat.icon} /> {stat.label}</div>
             <strong>{stat.value}</strong>
             <span className={`stat-note stat-note--${stat.tone}`}>{stat.note}</span>
           </article>
