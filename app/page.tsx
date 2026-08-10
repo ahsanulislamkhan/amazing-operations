@@ -22,6 +22,9 @@ const initialTasks: Task[] = [
   { invoice: "INV-10462", type: "Pickup", warehouse: "Ballarat", assignee: "David Lee", avatar: "/assets/avatar-david.png", scheduled: "29 Jul, 2026", status: "Pending" },
   { invoice: "INV-10463", type: "Container", warehouse: "Bendigo", assignee: "Laura Chen", avatar: "/assets/avatar-laura.png", scheduled: "30 Jul, 2026", status: "Delayed" },
   { invoice: "INV-10464", type: "Delivery", warehouse: "Werribee", assignee: "Mark Thompson", avatar: "/assets/avatar-mark.png", scheduled: "31 Jul, 2026", status: "Ready" },
+  { invoice: "INV-10465", type: "Delivery", warehouse: "St Albans", assignee: "Emma Watson", avatar: "/assets/avatar-emma.png", scheduled: "01 Aug, 2026", status: "Ready" },
+  { invoice: "INV-10466", type: "Pickup", warehouse: "Craigieburn", assignee: "James Smith", avatar: "/assets/avatar-james.png", scheduled: "02 Aug, 2026", status: "Pending" },
+  { invoice: "INV-10467", type: "Container", warehouse: "Truganina", assignee: "Sophia Patel", avatar: "/assets/avatar-sophia.png", scheduled: "03 Aug, 2026", status: "Delayed" },
 ];
 
 const navItems = [
@@ -104,6 +107,29 @@ function TaskType({ type }: { type: Task["type"] }) {
   );
 }
 
+function TaskTable({ tasks }: { tasks: Task[] }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th>Invoice</th><th>Type</th><th>Warehouse</th><th>Assigned to</th><th>Scheduled</th><th>Status</th></tr></thead>
+        <tbody>
+          {tasks.map((task) => (
+            <tr key={task.invoice}>
+              <td>{task.invoice}</td>
+              <td><TaskType type={task.type} /></td>
+              <td>{task.warehouse}</td>
+              <td><span className="assignee"><img src={task.avatar} alt="" />{task.assignee}</span></td>
+              <td>{task.scheduled}</td>
+              <td><span className={`status status--${task.status.toLowerCase()}`}>{task.status}</span></td>
+            </tr>
+          ))}
+          {tasks.length === 0 ? <tr><td className="empty-tasks" colSpan={6}>No tasks match these filters.</td></tr> : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function Home() {
   const [activeNav, setActiveNav] = useState("Dashboard");
   const [tasks, setTasks] = useState(initialTasks);
@@ -111,8 +137,18 @@ export default function Home() {
   const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
   const [newTaskType, setNewTaskType] = useState<Task["type"]>("Pickup");
   const [isPriority, setIsPriority] = useState(true);
+  const [taskSearch, setTaskSearch] = useState("");
+  const [warehouseFilter, setWarehouseFilter] = useState("All warehouse");
+  const [statusFilter, setStatusFilter] = useState("All status");
 
   const visibleTasks = showAll ? tasks : tasks.slice(0, 7);
+  const filteredTasks = tasks.filter((task) => {
+    const search = taskSearch.trim().toLowerCase();
+    const matchesSearch = !search || [task.invoice, task.type, task.warehouse, task.assignee].some((value) => value.toLowerCase().includes(search));
+    const matchesWarehouse = warehouseFilter === "All warehouse" || task.warehouse === warehouseFilter;
+    const matchesStatus = statusFilter === "All status" || task.status === statusFilter;
+    return matchesSearch && matchesWarehouse && matchesStatus;
+  });
 
   function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -147,7 +183,7 @@ export default function Home() {
         <nav className="main-nav" aria-label="Primary navigation">
           {navItems.map((item) => (
             <button
-              className={`nav-button ${activeNav === item.label ? "nav-button--active" : ""}`}
+              className={`nav-button nav-button--${item.label.toLowerCase()} ${activeNav === item.label ? "nav-button--active" : ""}`}
               key={item.label}
               onClick={() => setActiveNav(item.label)}
               type="button"
@@ -171,8 +207,8 @@ export default function Home() {
 
       <section className="overview" id="overview">
         <div className="overview-copy">
-          <h1>Operation Overview</h1>
-          <p>Everything moving smoothly through your warehouse<br className="desktop-break" /> network today.</p>
+          <h1>{activeNav === "Tasks" ? "All Tasks" : "Operation Overview"}</h1>
+          <p>{activeNav === "Tasks" ? "Plan, assign and track every pickup, delivery and container." : <>Everything moving smoothly through your warehouse<br className="desktop-break" /> network today.</>}</p>
         </div>
         <div className="overview-actions">
           <div className="date-block" aria-label="Saturday, August 19, 2026">
@@ -186,42 +222,46 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="stats-grid" aria-label="Today’s operations summary">
-        {stats.map((stat) => (
-          <article className="stat-card" key={stat.label}>
-            <div className={`stat-label stat-label--${stat.tone}`}><LayeredIcon kind={stat.icon} /> {stat.label}</div>
-            <strong>{stat.value}</strong>
-            <span className={`stat-note stat-note--${stat.tone}`}>{stat.note}</span>
-          </article>
-        ))}
-      </section>
+      {activeNav === "Tasks" ? (
+        <section className="task-board task-board--all" aria-label="All tasks">
+          <div className="task-filters">
+            <label className="task-search">
+              <img src="/assets/icon-search.svg" alt="" />
+              <input value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} placeholder="Search invoice, description or team member..." aria-label="Search tasks" />
+            </label>
+            <select value={warehouseFilter} onChange={(event) => setWarehouseFilter(event.target.value)} aria-label="Filter by warehouse">
+              <option>All warehouse</option>{Array.from(new Set(tasks.map((task) => task.warehouse))).map((warehouse) => <option key={warehouse}>{warehouse}</option>)}
+            </select>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by status">
+              <option>All status</option><option>Ready</option><option>Pending</option><option>Delayed</option>
+            </select>
+          </div>
 
-      <section className="task-board" aria-labelledby="task-board-title">
-        <div className="task-board__header">
-          <div><span>Live Operations</span><h2 id="task-board-title">Today’s Task Board</h2></div>
-          <button className="secondary-button" type="button" onClick={() => setShowAll((value) => !value)}>
-            {showAll ? "Show Today" : "View All Task"} <img src="/assets/icon-arrow-right.svg" alt="" />
-          </button>
-        </div>
+          <TaskTable tasks={filteredTasks} />
+        </section>
+      ) : (
+        <>
+          <section className="stats-grid" aria-label="Today’s operations summary">
+            {stats.map((stat) => (
+              <article className="stat-card" key={stat.label}>
+                <div className={`stat-label stat-label--${stat.tone}`}><LayeredIcon kind={stat.icon} /> {stat.label}</div>
+                <strong>{stat.value}</strong>
+                <span className={`stat-note stat-note--${stat.tone}`}>{stat.note}</span>
+              </article>
+            ))}
+          </section>
 
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Invoice</th><th>Type</th><th>Warehouse</th><th>Assigned to</th><th>Scheduled</th><th>Status</th></tr></thead>
-            <tbody>
-              {visibleTasks.map((task) => (
-                <tr key={task.invoice}>
-                  <td>{task.invoice}</td>
-                  <td><TaskType type={task.type} /></td>
-                  <td>{task.warehouse}</td>
-                  <td><span className="assignee"><img src={task.avatar} alt="" />{task.assignee}</span></td>
-                  <td>{task.scheduled}</td>
-                  <td><span className={`status status--${task.status.toLowerCase()}`}>{task.status}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <section className="task-board" aria-labelledby="task-board-title">
+            <div className="task-board__header">
+              <div><span>Live Operations</span><h2 id="task-board-title">Today’s Task Board</h2></div>
+              <button className="secondary-button" type="button" onClick={() => { setShowAll(true); setActiveNav("Tasks"); }}>
+                View All Task <img src="/assets/icon-arrow-right.svg" alt="" />
+              </button>
+            </div>
+            <TaskTable tasks={visibleTasks} />
+          </section>
+        </>
+      )}
 
       {isTaskPanelOpen ? (
         <div className="task-panel-backdrop" onMouseDown={() => setIsTaskPanelOpen(false)}>
