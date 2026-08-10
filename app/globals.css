@@ -96,8 +96,6 @@ th:nth-child(6), td:nth-child(6) { width: 6.5%; }
 .warehouse-side--left { left: 16%; }
 .warehouse-side--right { right: 16%; }
 .warehouse-door { left: 35%; top: 60%; width: 30%; height: 30%; }
-.theme-oval { inset: 30%; width: 40%; height: 40%; }
-.theme-shape { inset: 10%; width: 80%; height: 80%; }
 .dropdown-path { left: 23%; top: 35%; width: 54%; height: 30%; }
 .pickup-1 { left: 13%; top: 10%; width: 74%; height: 80%; }
 .pickup-2 { left: 48%; top: 28%; width: 38%; height: 24%; }

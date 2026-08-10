@@ -57,14 +57,6 @@ function LayeredIcon({ kind }: { kind: string }) {
     </span>;
   }
 
-  if (kind === "theme") {
-    return <span className="layered-icon theme-icon" aria-hidden="true">
-      <img className="layer-full" src="/assets/icon-theme-base.svg" alt="" />
-      <img className="theme-oval" src="/assets/icon-theme-oval.svg" alt="" />
-      <img className="theme-shape" src="/assets/icon-theme-shape.svg" alt="" />
-    </span>;
-  }
-
   if (kind === "dropdown") {
     return <span className="layered-icon dropdown-icon" aria-hidden="true">
       <img className="layer-full" src="/assets/icon-dropdown-base.svg" alt="" />
@@ -152,7 +144,6 @@ export default function Home() {
         </nav>
 
         <div className="user-actions">
-          <button className="circle-button" type="button" aria-label="Toggle appearance"><LayeredIcon kind="theme" /></button>
           <button className="circle-button" type="button" aria-label="View notifications"><img src="/assets/icon-bell-exact.svg" alt="" /></button>
           <button className="profile-button" type="button" aria-label="Open profile menu">
             <img src="/assets/avatar-ramie.png" alt="Ramie Shelbie" />
