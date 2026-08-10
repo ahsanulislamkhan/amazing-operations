@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 
 type Status = "Ready" | "Pending" | "Delayed";
 
@@ -108,16 +108,32 @@ export default function Home() {
   const [activeNav, setActiveNav] = useState("Dashboard");
   const [tasks, setTasks] = useState(initialTasks);
   const [showAll, setShowAll] = useState(false);
+  const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
+  const [newTaskType, setNewTaskType] = useState<Task["type"]>("Pickup");
+  const [isPriority, setIsPriority] = useState(true);
 
   const visibleTasks = showAll ? tasks : tasks.slice(0, 7);
 
-  function addTask() {
-    const next = tasks.length + 10458;
+  function createTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const invoice = String(data.get("invoice") || `INV-${tasks.length + 10458}`);
+    const scheduled = String(data.get("scheduled") || "26 Jul, 2026").replace(/(\d{2}) (\w{3}) (\d{4})/, "$1 $2, $3");
+    const assignee = String(data.get("assignee") || "Dipu Rai");
     setTasks((current) => [
       ...current,
-      { invoice: `INV-${next}`, type: "Pickup", warehouse: "Truganina", assignee: "Ramie Shelbie", avatar: "/assets/avatar-ramie.png", scheduled: "01 Aug, 2026", status: "Pending" },
+      {
+        invoice,
+        type: newTaskType,
+        warehouse: String(data.get("warehouse") || "Sunshine"),
+        assignee,
+        avatar: assignee === "Ramie Shelbie" ? "/assets/avatar-ramie.png" : "/assets/avatar-david.png",
+        scheduled,
+        status: isPriority ? "Pending" : "Ready",
+      },
     ]);
     setShowAll(true);
+    setIsTaskPanelOpen(false);
   }
 
   return (
@@ -164,7 +180,7 @@ export default function Home() {
             <span>Sat,<br />August, 2026</span>
             <span className="date-chevron"><LayeredIcon kind="dropdown" /></span>
           </div>
-          <button className="primary-button" type="button" onClick={addTask}>
+          <button className="primary-button" type="button" onClick={() => setIsTaskPanelOpen(true)}>
             <img src="/assets/icon-add.svg" alt="" /> Add new task
           </button>
         </div>
@@ -206,6 +222,111 @@ export default function Home() {
           </table>
         </div>
       </section>
+
+      {isTaskPanelOpen ? (
+        <div className="task-panel-backdrop" onMouseDown={() => setIsTaskPanelOpen(false)}>
+          <aside
+            className="task-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-task-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="task-panel__header">
+              <div>
+                <span>Operations</span>
+                <h2 id="create-task-title">Create new task</h2>
+              </div>
+              <button className="task-panel__close" type="button" onClick={() => setIsTaskPanelOpen(false)} aria-label="Close create task panel">
+                <span aria-hidden="true">×</span>
+              </button>
+            </div>
+
+            <form className="task-form" onSubmit={createTask}>
+              <div className="task-type-picker" aria-label="Task type">
+                {(["Pickup", "Delivery", "Container"] as Task["type"][]).map((type) => (
+                  <button
+                    className={`task-type-option ${newTaskType === type ? "task-type-option--active" : ""}`}
+                    type="button"
+                    key={type}
+                    onClick={() => setNewTaskType(type)}
+                    aria-pressed={newTaskType === type}
+                  >
+                    {type === "Delivery" ? <img src="/assets/icon-delivery.svg" alt="" /> : type === "Pickup" ? <PickupIcon /> : <ContainerIcon />}
+                    {type}
+                  </button>
+                ))}
+              </div>
+
+              <label className="form-field">
+                <span>Invoice number</span>
+                <input name="invoice" placeholder="e.g. INV- 10458" required />
+              </label>
+
+              <label className="form-field">
+                <span>Schedule date</span>
+                <span className="input-with-icon">
+                  <input name="scheduled" defaultValue="26 Jul 2026" required />
+                  <img src="/assets/icon-calendar.svg" alt="" />
+                </span>
+              </label>
+
+              <label className="form-field">
+                <span>Description</span>
+                <textarea name="description" placeholder="Short summary of the order or operational work" rows={3} />
+              </label>
+
+              <div className="task-form__row">
+                <label className="form-field">
+                  <span>Item</span>
+                  <input name="item" placeholder="e.g. Calacatta Cloud tiles" />
+                </label>
+                <label className="form-field form-field--quantity">
+                  <span>Quantity</span>
+                  <input name="quantity" inputMode="numeric" placeholder="24" />
+                </label>
+              </div>
+
+              <div className="task-form__row">
+                <label className="form-field">
+                  <span>Warehouse</span>
+                  <select name="warehouse" defaultValue="Sunshine">
+                    <option>Sunshine</option><option>Hoppers Crossing</option><option>Melton</option><option>Geelong</option>
+                  </select>
+                </label>
+                <label className="form-field">
+                  <span>Assigned to</span>
+                  <select name="assignee" defaultValue="Dipu Rai">
+                    <option>Dipu Rai</option><option>Ramie Shelbie</option><option>Ryan Kim</option><option>Ehsanul Islam</option>
+                  </select>
+                </label>
+              </div>
+
+              <label className="form-field">
+                <span>Notes</span>
+                <textarea name="notes" placeholder="Access details, customer instructions or internal notes" rows={3} />
+              </label>
+
+              <div className="priority-row">
+                <div><strong>Priority task</strong><span>Mark this task as high priority</span></div>
+                <button
+                  className={`priority-switch ${isPriority ? "priority-switch--active" : ""}`}
+                  type="button"
+                  role="switch"
+                  aria-checked={isPriority}
+                  aria-label="High priority"
+                  onClick={() => setIsPriority((value) => !value)}
+                ><span /></button>
+              </div>
+
+              <div className="task-form__actions">
+                <button className="cancel-button" type="button" onClick={() => setIsTaskPanelOpen(false)}>Cancel</button>
+                <button className="create-button" type="submit">Create Task</button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      ) : null}
     </main>
   );
 }
