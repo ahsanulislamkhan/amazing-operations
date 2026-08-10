@@ -40,6 +40,12 @@ const stats = [
   { label: "Stock Request", value: "03", note: "Waiting for approval", tone: "yellow", icon: "box" },
 ];
 
+const warehouses = [
+  { office: "Head Office", name: "Sunshine", address: "616 Somerville Road, Sunshine West VIC 3020", status: null, statOne: "03", labelOne: "Active tasks", statTwo: "02", labelTwo: "Ready now" },
+  { office: "Regional Office", name: "Geelong", address: "45 Corio Bay Road, Geelong VIC 3220", status: "Pending", statOne: "04", labelOne: "In progress", statTwo: "05", labelTwo: "Awaiting approval" },
+  { office: "Branch Office", name: "Ballarat", address: "89 Lydiard Street, Ballarat VIC 3350", status: "Rejected", statOne: "05", labelOne: "Completed tasks", statTwo: "01", labelTwo: "Not started" },
+];
+
 function LayeredIcon({ kind }: { kind: string }) {
   if (kind === "warehouse") {
     return <span className="layered-icon warehouse-icon" aria-hidden="true">
@@ -93,6 +99,15 @@ function ContainerIcon() {
     <img className="layer-full" src="/assets/icon-container-base.svg" alt="" />
     <img className="container-path" src="/assets/icon-container-path.svg" alt="" />
     <span className="container-square" />
+  </span>;
+}
+
+function WarehouseCardIcon() {
+  return <span className="warehouse-card-icon" aria-hidden="true">
+    <img className="layer-full" src="/assets/icon-warehouse-card-base.svg" alt="" />
+    <img className="warehouse-card-outline" src="/assets/icon-warehouse-card-outline.svg" alt="" />
+    <img className="warehouse-card-door" src="/assets/icon-warehouse-card-door.svg" alt="" />
+    <img className="warehouse-card-detail" src="/assets/icon-warehouse-card-detail.svg" alt="" />
   </span>;
 }
 
@@ -207,8 +222,8 @@ export default function Home() {
 
       <section className="overview" id="overview">
         <div className="overview-copy">
-          <h1>{activeNav === "Tasks" ? "All Tasks" : "Operation Overview"}</h1>
-          <p>{activeNav === "Tasks" ? "Plan, assign and track every pickup, delivery and container." : <>Everything moving smoothly through your warehouse<br className="desktop-break" /> network today.</>}</p>
+          <h1>{activeNav === "Tasks" ? "All Tasks" : activeNav === "Warehouses" ? "Warehouses" : "Operation Overview"}</h1>
+          <p>{activeNav === "Tasks" ? "Plan, assign and track every pickup, delivery and container." : activeNav === "Warehouses" ? <>Your three active Amazing Tiles warehouse<br className="desktop-break" /> locations.</> : <>Everything moving smoothly through your warehouse<br className="desktop-break" /> network today.</>}</p>
         </div>
         <div className="overview-actions">
           <div className="date-block" aria-label="Saturday, August 19, 2026">
@@ -216,13 +231,33 @@ export default function Home() {
             <span>Sat,<br />August, 2026</span>
             <span className="date-chevron"><LayeredIcon kind="dropdown" /></span>
           </div>
-          <button className="primary-button" type="button" onClick={() => setIsTaskPanelOpen(true)}>
+          {activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => setIsTaskPanelOpen(true)}>
             <img src="/assets/icon-add.svg" alt="" /> Add new task
-          </button>
+          </button> : null}
         </div>
       </section>
 
-      {activeNav === "Tasks" ? (
+      {activeNav === "Warehouses" ? (
+        <section className="warehouse-grid" aria-label="Warehouse locations">
+          {warehouses.map((warehouse) => (
+            <article className="warehouse-card" key={warehouse.name}>
+              <div className="warehouse-card__header">
+                <span className="warehouse-card__icon"><WarehouseCardIcon /></span>
+                {warehouse.status ? <span className={`warehouse-state warehouse-state--${warehouse.status.toLowerCase()}`}>{warehouse.status}</span> : null}
+              </div>
+              <div className="warehouse-card__body">
+                <span className="warehouse-office">{warehouse.office}</span>
+                <h2>{warehouse.name}</h2>
+                <p className="warehouse-address"><img src="/assets/icon-location.svg" alt="" />{warehouse.address}</p>
+                <div className="warehouse-stats">
+                  <div><strong>{warehouse.statOne}</strong><span>{warehouse.labelOne}</span></div>
+                  <div><strong>{warehouse.statTwo}</strong><span>{warehouse.labelTwo}</span></div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : activeNav === "Tasks" ? (
         <section className="task-board task-board--all" aria-label="All tasks">
           <div className="task-filters">
             <label className="task-search">
