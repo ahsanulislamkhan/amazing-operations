@@ -493,25 +493,53 @@ th:nth-child(6), td:nth-child(6) { width: 6.5%; }
 }
 
 @media (max-width: 600px) {
+  .login-hero { height: 280px; min-height: 280px; }
+  .login-brand { top: 24px; left: 20px; }
+  .login-brand__mark { width: 44px; height: 44px; }
+  .login-brand__mark img { width: 22px; height: auto; }
+  .login-brand__word { width: 124px; height: auto; }
+  .login-hero__copy { top: 96px; left: 20px; width: calc(100% - 40px); gap: 8px; }
+  .login-hero__copy > div { gap: 6px; }
+  .login-hero__copy p { font-size: 14px; line-height: 1.4; letter-spacing: -.14px; }
+  .login-hero__copy h2 { font-size: 32px; line-height: 1.08; letter-spacing: -.64px; }
+  .login-panel { padding: 32px 20px 40px; }
+  .login-card { max-width: none; gap: 32px; }
+  .login-content { gap: 24px; }
+  .login-header { gap: 8px; }
+  .login-title-group { gap: 4px; }
+  .login-header h1 { font-size: 36px; line-height: 1.1; letter-spacing: -.72px; }
+  .login-header p { font-size: 15px; }
   .access-options { grid-template-columns: 1fr; gap: 12px; }
+  .access-option { height: 64px; padding: 10px 14px; }
+  .access-option__details { gap: 8px; }
+  .access-option__icon { width: 40px; height: 40px; flex-basis: 40px; }
+  .access-option__copy strong { font-size: 16px; }
+  .login-fields { gap: 14px; }
+  .login-field { gap: 8px; font-size: 14px; }
+  .login-field > input, .password-field { height: 52px; }
+  .login-field > input, .password-field input { padding-inline: 20px; }
+  .password-field button { height: 50px; }
+  .remember-device { font-size: 14px; }
+  .login-submit { height: 56px; }
   .administration-fields { grid-template-columns: 1fr; }
   .administration-modal { padding: 18px; }
 }
 
 @media (max-width: 380px) {
-  .login-hero { height: 350px; min-height: 350px; }
-  .login-brand { top: 24px; left: 18px; }
+  .login-hero { height: 260px; min-height: 260px; }
+  .login-brand { top: 20px; left: 16px; }
   .login-brand__mark { width: 40px; height: 40px; }
-  .login-brand__mark img { width: 30px; height: 25px; }
+  .login-brand__mark img { width: 20px; height: auto; }
   .login-brand__word { width: 112px; height: auto; }
-  .login-hero__copy { top: 110px; left: 18px; width: calc(100% - 36px); }
-  .login-hero__copy h2 { font-size: 36px; }
-  .login-panel { padding: 40px 18px; }
-  .login-card { gap: 36px; }
-  .login-content { gap: 28px; }
-  .login-header h1 { font-size: 36px; }
-  .access-option { height: 70px; }
-  .login-submit { height: 60px; }
+  .login-hero__copy { top: 86px; left: 16px; width: calc(100% - 32px); }
+  .login-hero__copy p { font-size: 13px; }
+  .login-hero__copy h2 { font-size: 29px; }
+  .login-panel { padding: 28px 16px 36px; }
+  .login-card { gap: 28px; }
+  .login-content { gap: 22px; }
+  .login-header h1 { font-size: 32px; }
+  .access-option { height: 62px; }
+  .login-submit { height: 56px; }
   .overview-actions { align-items: stretch; flex-direction: column; }
   .date-block { width: 100%; }
   .primary-button { width: 100%; justify-content: center; }
