@@ -1,8 +1,19 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 type Status = "Ready" | "Pending" | "Delayed";
+type AccessType = "Manager" | "Warehouse Team";
+type SettingsSection = "My Account" | "Role Management" | "Password" | "Notification";
+
+type Administrator = {
+  id: number;
+  name: string;
+  email: string;
+  role: "Manager" | "Team member";
+  status: "Verified" | "Pending";
+  avatar: string;
+};
 
 type Task = {
   invoice: string;
@@ -33,17 +44,53 @@ const navItems = [
   { label: "Warehouses", icon: "warehouse" },
 ];
 
+const profileSections: SettingsSection[] = ["My Account", "Role Management", "Password", "Notification"];
+
+const initialAdministrators: Administrator[] = [
+  { id: 1, name: "Rumin Rjazier", email: "ruminraizer@gmail.com", role: "Manager", status: "Verified", avatar: "/assets/avatar-ehsanul.png" },
+  { id: 2, name: "Alexandra Pritchard", email: "alex.pritchard@example.com", role: "Team member", status: "Pending", avatar: "/assets/avatar-alice.png" },
+  { id: 3, name: "Jason Lee", email: "jason.lee@email.com", role: "Manager", status: "Verified", avatar: "/assets/avatar-david.png" },
+  { id: 4, name: "Maria Gonzalez", email: "maria.gonzalez@company.com", role: "Team member", status: "Verified", avatar: "/assets/avatar-laura.png" },
+  { id: 5, name: "Nina Patel", email: "nina.patel@service.com", role: "Team member", status: "Verified", avatar: "/assets/avatar-sophia.png" },
+  { id: 6, name: "Samuel Kim", email: "sam.kim@business.org", role: "Team member", status: "Verified", avatar: "/assets/avatar-ramie.png" },
+  { id: 7, name: "Liam O’Connor", email: "liam.oconnor@gmail.com", role: "Team member", status: "Pending", avatar: "/assets/avatar-emma.png" },
+  { id: 8, name: "Olivia Smith", email: "olivia.smith@startup.com", role: "Team member", status: "Pending", avatar: "/assets/avatar-mark.png" },
+];
+
+const accountDefaults = {
+  name: "Ramie Shelbie",
+  email: "ramieshelbie@gmail.com",
+  location: "616 Somerville Road, Sunshine West VIC 3020",
+};
+
+const defaultNotificationSettings = {
+  confirmation: true,
+  edited: false,
+  invoice: true,
+  cancelled: true,
+  refund: true,
+  paymentError: false,
+};
+
+const notificationOptions = [
+  { key: "confirmation", title: "Transaction Confirmation", description: "Sent automatically to the customer after they place their order." },
+  { key: "edited", title: "Transaction Edited", description: "Sent to the customer after their order is edited (if you select this option)." },
+  { key: "invoice", title: "Transaction Invoice", description: "Sent to the customer when the order has an outstanding balance." },
+  { key: "cancelled", title: "Transaction Cancelled", description: "Sent automatically to the customer if their order is cancelled (if you select this option)." },
+  { key: "refund", title: "Transaction Refund", description: "Sent automatically to the customer if their order is refunded (if you select this option)." },
+  { key: "paymentError", title: "Payment Error", description: "Sent automatically to the customer if their payment can’t be processed during checkout." },
+] as const;
+
 const stats = [
   { label: "Pending Today", value: "02", note: "Across 3 warehouses", tone: "blue", icon: "clock" },
   { label: "Complete Today", value: "04", note: "2 completed on time", tone: "green", icon: "complete" },
   { label: "Delayed", value: "01", note: "Needs your attention", tone: "red", icon: "danger" },
-  { label: "Stock Request", value: "03", note: "Waiting for approval", tone: "yellow", icon: "box" },
 ];
 
 const warehouses = [
-  { office: "Head Office", name: "Sunshine", address: "616 Somerville Road, Sunshine West VIC 3020", status: null, statOne: "03", labelOne: "Active tasks", statTwo: "02", labelTwo: "Ready now" },
-  { office: "Regional Office", name: "Geelong", address: "45 Corio Bay Road, Geelong VIC 3220", status: "Pending", statOne: "04", labelOne: "In progress", statTwo: "05", labelTwo: "Awaiting approval" },
-  { office: "Branch Office", name: "Ballarat", address: "89 Lydiard Street, Ballarat VIC 3350", status: "Rejected", statOne: "05", labelOne: "Completed tasks", statTwo: "01", labelTwo: "Not started" },
+  { office: "Head Office", name: "Sunshine", address: "616 Somerville Road, Sunshine West VIC 3020", statOne: "03", labelOne: "Active tasks", statTwo: "02", labelTwo: "Ready now" },
+  { office: "Regional Office", name: "Geelong", address: "45 Corio Bay Road, Geelong VIC 3220", statOne: "04", labelOne: "In progress", statTwo: "05", labelTwo: "Awaiting approval" },
+  { office: "Branch Office", name: "Ballarat", address: "89 Lydiard Street, Ballarat VIC 3350", statOne: "05", labelOne: "Completed tasks", statTwo: "01", labelTwo: "Not started" },
 ];
 
 function LayeredIcon({ kind }: { kind: string }) {
@@ -111,6 +158,14 @@ function WarehouseCardIcon() {
   </span>;
 }
 
+function LogoutIcon() {
+  return <span className="logout-icon" aria-hidden="true">
+    <img className="logout-icon__base" src="/assets/icon-logout-base.svg" alt="" />
+    <img className="logout-icon__path" src="/assets/icon-logout-path.svg" alt="" />
+    <img className="logout-icon__shape" src="/assets/icon-logout-shape.svg" alt="" />
+  </span>;
+}
+
 function TaskType({ type }: { type: Task["type"] }) {
   return (
     <span className={`task-type task-type--${type.toLowerCase()}`}>
@@ -122,14 +177,28 @@ function TaskType({ type }: { type: Task["type"] }) {
   );
 }
 
-function TaskTable({ tasks }: { tasks: Task[] }) {
+function TaskTable({ tasks, onSelect }: { tasks: Task[]; onSelect?: (task: Task) => void }) {
   return (
     <div className="table-wrap">
       <table>
         <thead><tr><th>Invoice</th><th>Type</th><th>Warehouse</th><th>Assigned to</th><th>Scheduled</th><th>Status</th></tr></thead>
         <tbody>
           {tasks.map((task) => (
-            <tr key={task.invoice}>
+            <tr
+              className={onSelect ? "task-row--interactive" : undefined}
+              key={task.invoice}
+              tabIndex={onSelect ? 0 : undefined}
+              onClick={(event) => {
+                event.currentTarget.blur();
+                onSelect?.(task);
+              }}
+              onKeyDown={(event) => {
+                if (onSelect && (event.key === "Enter" || event.key === " ")) {
+                  event.preventDefault();
+                  onSelect(task);
+                }
+              }}
+            >
               <td>{task.invoice}</td>
               <td><TaskType type={task.type} /></td>
               <td>{task.warehouse}</td>
@@ -145,8 +214,340 @@ function TaskTable({ tasks }: { tasks: Task[] }) {
   );
 }
 
-export default function Home() {
+function LoginScreen({ onSignIn }: { onSignIn: () => void }) {
+  const [accessType, setAccessType] = useState<AccessType>("Manager");
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberDevice, setRememberDevice] = useState(false);
+
+  function signIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSignIn();
+  }
+
+  return (
+    <main className="login-shell">
+      <section className="login-hero" aria-label="Amazing Operations onboarding">
+        <div className="login-brand" aria-label="Amazing Operations">
+          <span className="login-brand__mark"><img src="/assets/login-logo-mark-white.svg" alt="" /></span>
+          <img className="login-brand__word" src="/assets/login-logo-wordmark-white.svg" alt="Amazing Operations" />
+        </div>
+        <div className="login-hero__copy">
+          <div>
+            <p>One connected operation</p>
+            <h2>Every warehouse.<br />One clear plan.</h2>
+          </div>
+          <p>Keep pickups, deliveries, container arrivals and stock transfers organised across Sunshine, Hoppers Crossing and Melton.</p>
+        </div>
+        <div className="login-feature" aria-label="Warehouse operations preview">
+          <img className="login-feature__photo" src="/assets/login-team-photo.png" alt="Team members reviewing a stone tile in the showroom" />
+          <div className="login-feature__tag login-feature__tag--overview">
+            <span className="login-feature__overview-icon" aria-hidden="true">
+              <img src="/assets/icon-login-overview-main.svg" alt="" />
+              <img src="/assets/icon-login-overview-detail.svg" alt="" />
+            </span>
+            <span>Work Overview</span>
+          </div>
+          <div className="login-feature__tag login-feature__tag--task">
+            <img src="/assets/icon-login-document.svg" alt="" />
+            <span>Assign Task</span>
+          </div>
+        </div>
+        <div className="login-carousel-dots" aria-hidden="true"><span /><span /><span /></div>
+      </section>
+
+      <section className="login-panel" aria-labelledby="login-title">
+        <form className="login-card" onSubmit={signIn}>
+          <div className="login-content">
+            <div className="login-header">
+              <div className="login-title-group">
+                <p className="login-eyebrow">Welcome back</p>
+                <h1 id="login-title">Sign in to Operations</h1>
+              </div>
+              <p>Choose your access type to continue.</p>
+            </div>
+
+            <div className="access-options" aria-label="Choose access type">
+              {(["Manager", "Warehouse Team"] as AccessType[]).map((type) => {
+                const selected = accessType === type;
+                return (
+                  <button
+                    className={`access-option ${selected ? "access-option--selected" : ""}`}
+                    key={type}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setAccessType(type)}
+                  >
+                    <span className="access-option__details">
+                      <span className="access-option__icon">
+                        <img src={type === "Manager" ? "/assets/icon-login-manager.svg" : "/assets/icon-login-team.svg"} alt="" />
+                      </span>
+                      <span className="access-option__copy">
+                        <strong>{type}</strong>
+                        <small>{type === "Manager" ? "All warehouses" : "Assigned task"}</small>
+                      </span>
+                    </span>
+                    <span className="access-option__radio" aria-hidden="true"><span /></span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="login-fields">
+              <label className="login-field">
+                <span>Full Name</span>
+                <input name="fullName" type="text" placeholder="*********" autoComplete="name" required />
+              </label>
+              <label className="login-field">
+                <span>Work E-mail</span>
+                <input name="email" type="email" placeholder="*********" autoComplete="email" required />
+              </label>
+              <label className="login-field">
+                <span>Password</span>
+                <span className="password-field">
+                  <input name="password" type={showPassword ? "text" : "password"} placeholder="*********" autoComplete="current-password" required />
+                  <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"}>
+                    <img src="/assets/icon-login-eye.svg" alt="" />
+                  </button>
+                </span>
+              </label>
+
+              <label className="remember-device">
+                <input type="checkbox" checked={rememberDevice} onChange={(event) => setRememberDevice(event.target.checked)} />
+                <span>Remember this device</span>
+              </label>
+            </div>
+          </div>
+
+          <button className="login-submit" type="submit">
+            <span>Sign in as {accessType}</span>
+            <img src="/assets/icon-arrow-right.svg" alt="" />
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function SettingsPage({
+  activeSection,
+  onSectionChange,
+  onSignOut,
+}: {
+  activeSection: SettingsSection;
+  onSectionChange: (section: SettingsSection) => void;
+  onSignOut: () => void;
+}) {
+  const [account, setAccount] = useState(accountDefaults);
+  const [passwords, setPasswords] = useState({ current: "", next: "", confirm: "" });
+  const [notifications, setNotifications] = useState(defaultNotificationSettings);
+  const [administrators, setAdministrators] = useState(initialAdministrators);
+  const [roleStatusFilter, setRoleStatusFilter] = useState("All status");
+  const [isAdministrationModalOpen, setIsAdministrationModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isAdministrationModalOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsAdministrationModalOpen(false);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isAdministrationModalOpen]);
+
+  const visibleAdministrators = administrators.filter((administrator) => (
+    roleStatusFilter === "All status" || administrator.status === roleStatusFilter
+  ));
+
+  function addAdministrator(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const role = String(data.get("role") || "Manager") as Administrator["role"];
+    setAdministrators((current) => [
+      ...current,
+      {
+        id: Date.now(),
+        name: String(data.get("name") || "New team member"),
+        email: String(data.get("email") || "youremail@gmail.com"),
+        role,
+        status: "Pending",
+        avatar: "/assets/avatar-james.png",
+      },
+    ]);
+    setIsAdministrationModalOpen(false);
+  }
+
+  return (
+    <>
+      <section className="settings-card" aria-label={`${activeSection} settings`}>
+        <aside className="settings-sidebar" aria-label="Settings navigation">
+          {profileSections.map((section) => (
+            <button
+              className={`settings-sidebar__item ${activeSection === section ? "settings-sidebar__item--active" : ""}`}
+              type="button"
+              key={section}
+              aria-current={activeSection === section ? "page" : undefined}
+              onClick={() => onSectionChange(section)}
+            >
+              {section}
+            </button>
+          ))}
+          <button className="settings-sidebar__item settings-sidebar__logout" type="button" onClick={onSignOut}>
+            <LogoutIcon />
+            Log Out
+          </button>
+        </aside>
+
+        <div className="settings-content">
+          {activeSection === "My Account" ? (
+            <form className="settings-view" onSubmit={(event) => event.preventDefault()}>
+              <div className="settings-form-layout">
+                <div className="settings-intro">
+                  <h2>Account Setting</h2>
+                  <p>View and update your account details,<br />profile, and more.</p>
+                </div>
+                <div className="settings-fields">
+                  <label className="settings-field"><span>Full Name<em>*</em></span><input value={account.name} onChange={(event) => setAccount({ ...account, name: event.target.value })} /></label>
+                  <label className="settings-field"><span>E-mail Address<em>*</em></span><input type="email" value={account.email} onChange={(event) => setAccount({ ...account, email: event.target.value })} /></label>
+                  <label className="settings-field"><span>Location<em>*</em></span><input value={account.location} onChange={(event) => setAccount({ ...account, location: event.target.value })} /></label>
+                </div>
+              </div>
+              <div className="settings-actions">
+                <button type="button" onClick={() => setAccount(accountDefaults)}>Cancel</button>
+                <button type="submit">Save change</button>
+              </div>
+            </form>
+          ) : null}
+
+          {activeSection === "Role Management" ? (
+            <div className="settings-view settings-view--roles">
+              <div className="role-management-header">
+                <div className="settings-intro">
+                  <h2>Role Management</h2>
+                  <p>Manage your roles and permissions effortlessly.</p>
+                </div>
+                <div className="role-management-controls">
+                  <label>
+                    <span className="sr-only">Filter administration status</span>
+                    <select value={roleStatusFilter} onChange={(event) => setRoleStatusFilter(event.target.value)}>
+                      <option>All status</option><option>Verified</option><option>Pending</option>
+                    </select>
+                  </label>
+                  <button className="settings-add-button" type="button" onClick={() => setIsAdministrationModalOpen(true)}><img src="/assets/icon-add.svg" alt="" /> Add new</button>
+                </div>
+              </div>
+
+              <div className="administrators-table-wrap">
+                <div className="administrators-table" role="table" aria-label="Administration roles">
+                  <div className="administrators-row administrators-row--head" role="row">
+                    <span role="columnheader">Administration Name</span><span role="columnheader">E-mail</span><span role="columnheader">Role</span><span role="columnheader">Status</span><span aria-hidden="true" />
+                  </div>
+                  {visibleAdministrators.map((administrator) => (
+                    <div className="administrators-row" role="row" key={administrator.id}>
+                      <span className="administrator-name" role="cell"><img src={administrator.avatar} alt="" />{administrator.name}</span>
+                      <span role="cell">{administrator.email}</span>
+                      <span role="cell">{administrator.role}</span>
+                      <span className={`administrator-status administrator-status--${administrator.status.toLowerCase()}`} role="cell"><img src={administrator.status === "Verified" ? "/assets/icon-admin-verified.png" : "/assets/icon-admin-pending.png"} alt="" />{administrator.status}</span>
+                      <button className="administrator-more" type="button" aria-label={`More actions for ${administrator.name}`}><img src="/assets/icon-admin-more.png" alt="" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-actions">
+                <button type="button" onClick={() => setRoleStatusFilter("All status")}>Cancel</button>
+                <button type="button">Save change</button>
+              </div>
+            </div>
+          ) : null}
+
+          {activeSection === "Password" ? (
+            <form className="settings-view" onSubmit={(event) => { event.preventDefault(); setPasswords({ current: "", next: "", confirm: "" }); }}>
+              <div className="settings-form-layout">
+                <div className="settings-intro">
+                  <h2>Password</h2>
+                  <p>Switch up your password or check it out!<br />Change it if want.</p>
+                </div>
+                <div className="settings-fields">
+                  <label className="settings-field"><span>Current Password<em>*</em></span><input required type="password" placeholder="*********" value={passwords.current} onChange={(event) => setPasswords({ ...passwords, current: event.target.value })} /></label>
+                  <label className="settings-field"><span>New Password<em>*</em></span><input required type="password" placeholder="*********" value={passwords.next} onChange={(event) => setPasswords({ ...passwords, next: event.target.value })} /></label>
+                  <label className="settings-field"><span>Confirm Password<em>*</em></span><input required type="password" placeholder="*********" value={passwords.confirm} onChange={(event) => setPasswords({ ...passwords, confirm: event.target.value })} /></label>
+                </div>
+              </div>
+              <div className="settings-actions">
+                <button type="button" onClick={() => setPasswords({ current: "", next: "", confirm: "" })}>Cancel</button>
+                <button type="submit">Save change</button>
+              </div>
+            </form>
+          ) : null}
+
+          {activeSection === "Notification" ? (
+            <div className="settings-view">
+              <div className="notification-layout">
+                <div className="settings-intro">
+                  <h2>Push Notification</h2>
+                  <p>Get alerts for new orders, order processing<br />updates, and when orders are completed or<br />canceled.</p>
+                </div>
+                <div className="notification-list">
+                  {notificationOptions.map((option) => {
+                    const enabled = notifications[option.key];
+                    return (
+                      <div className="notification-option" key={option.key}>
+                        <span><strong>{option.title}</strong><small>{option.description}</small></span>
+                        <button
+                          className={`settings-toggle ${enabled ? "settings-toggle--on" : ""}`}
+                          type="button"
+                          role="switch"
+                          aria-checked={enabled}
+                          aria-label={option.title}
+                          onClick={() => setNotifications({ ...notifications, [option.key]: !enabled })}
+                        ><i /></button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="settings-actions">
+                <button type="button" onClick={() => setNotifications({ ...defaultNotificationSettings })}>Cancel</button>
+                <button type="button">Save change</button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {isAdministrationModalOpen ? (
+        <div className="administration-modal-backdrop" onMouseDown={() => setIsAdministrationModalOpen(false)}>
+          <section className="administration-modal" role="dialog" aria-modal="true" aria-labelledby="add-administration-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="administration-modal__header">
+              <button type="button" aria-label="Go back" onClick={() => setIsAdministrationModalOpen(false)}><img src="/assets/icon-admin-back.png" alt="" /></button>
+              <h2 id="add-administration-title">Add Administration</h2>
+              <button type="button" aria-label="Close" onClick={() => setIsAdministrationModalOpen(false)}><img src="/assets/icon-admin-close.png" alt="" /></button>
+            </header>
+            <div className="administration-avatar"><img src="/assets/admin-reference-avatar.jpeg" alt="New administrator" /><span><img src="/assets/icon-admin-avatar-edit.svg" alt="" /></span></div>
+            <form className="administration-form" onSubmit={addAdministrator}>
+              <h3>Stuff Information</h3>
+              <div className="administration-fields">
+                <label><span>Stuff Name</span><input name="name" placeholder="Rumin Rafi" required /></label>
+                <label><span>Role</span><select name="role" defaultValue="Manager"><option>Manager</option><option>Team member</option></select></label>
+                <label><span>E-mail Address</span><input name="email" type="email" placeholder="youremail@gmail.com" required /></label>
+                <label><span>Gender</span><select name="gender" defaultValue="Male"><option>Male</option><option>Female</option><option>Prefer not to say</option></select></label>
+                <label><span>Date of Birth</span><input name="dateOfBirth" placeholder="12/06/2004" /></label>
+                <label><span>Location</span><select name="location" defaultValue="Melbourne, Australia"><option>Melbourne, Australia</option><option>Sunshine, Australia</option><option>Geelong, Australia</option></select></label>
+              </div>
+              <div className="administration-form__actions">
+                <button type="button" onClick={() => setIsAdministrationModalOpen(false)}>Cancel</button>
+                <button type="submit">Save</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const [activeNav, setActiveNav] = useState("Dashboard");
+  const [activeSettings, setActiveSettings] = useState<SettingsSection | null>(null);
   const [tasks, setTasks] = useState(initialTasks);
   const [showAll, setShowAll] = useState(false);
   const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
@@ -155,6 +556,29 @@ export default function Home() {
   const [taskSearch, setTaskSearch] = useState("");
   const [warehouseFilter, setWarehouseFilter] = useState("All warehouse");
   const [statusFilter, setStatusFilter] = useState("All status");
+  const [selectedOrder, setSelectedOrder] = useState<Task | null>(null);
+  const [isOrderEditing, setIsOrderEditing] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isProfileMenuOpen) return;
+
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (!profileMenuRef.current?.contains(event.target as Node)) setIsProfileMenuOpen(false);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsProfileMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isProfileMenuOpen]);
 
   const visibleTasks = showAll ? tasks : tasks.slice(0, 7);
   const filteredTasks = tasks.filter((task) => {
@@ -190,7 +614,7 @@ export default function Home() {
   return (
     <main className="dashboard-shell">
       <header className="topbar">
-        <a className="brand" href="#overview" aria-label="Amazing Operations home">
+        <a className="brand" href="#overview" aria-label="Amazing Operations home" onClick={() => { setActiveSettings(null); setActiveNav("Dashboard"); }}>
           <span className="brand__mark-wrap"><img className="brand__mark" src="/assets/logo-mark.svg" alt="" /></span>
           <img className="brand__word" src="/assets/logo-wordmark.svg" alt="Amazing Operations" />
         </a>
@@ -198,32 +622,61 @@ export default function Home() {
         <nav className="main-nav" aria-label="Primary navigation">
           {navItems.map((item) => (
             <button
-              className={`nav-button nav-button--${item.label.toLowerCase()} ${activeNav === item.label ? "nav-button--active" : ""}`}
+              className={`nav-button nav-button--${item.label.toLowerCase()} ${!activeSettings && activeNav === item.label ? "nav-button--active" : ""}`}
               key={item.label}
-              onClick={() => setActiveNav(item.label)}
+              onClick={() => { setActiveSettings(null); setActiveNav(item.label); }}
               type="button"
             >
               <LayeredIcon kind={item.icon} />
               <span>{item.label}</span>
-              {item.label === "Dashboard" ? <span className="nav-count">2</span> : null}
             </button>
           ))}
         </nav>
 
         <div className="user-actions">
           <button className="circle-button" type="button" aria-label="View notifications"><img src="/assets/icon-bell-exact.svg" alt="" /></button>
-          <button className="profile-button" type="button" aria-label="Open profile menu">
-            <img src="/assets/avatar-ramie.png" alt="Ramie Shelbie" />
-            <span><strong>Ramie Shelbie</strong><small>tomashelbie@gmail.com</small></span>
-            <span className="chevron"><LayeredIcon kind="dropdown" /></span>
-          </button>
+          <div className="profile-menu-wrap" ref={profileMenuRef}>
+            <button
+              className="profile-button"
+              type="button"
+              aria-label={isProfileMenuOpen ? "Close profile menu" : "Open profile menu"}
+              aria-haspopup="menu"
+              aria-expanded={isProfileMenuOpen}
+              onClick={() => setIsProfileMenuOpen((open) => !open)}
+            >
+              <img src="/assets/avatar-ramie.png" alt="Ramie Shelbie" />
+              <span><strong>Ramie Shelbie</strong><small>tomashelbie@gmail.com</small></span>
+              <span className="chevron"><LayeredIcon kind="dropdown" /></span>
+            </button>
+
+            {isProfileMenuOpen ? (
+              <div className="profile-menu" role="menu" aria-label="Profile settings">
+                {profileSections.map((label) => (
+                  <button
+                    className={`profile-menu__item ${activeSettings === label ? "profile-menu__item--active" : ""}`}
+                    type="button"
+                    role="menuitem"
+                    key={label}
+                    aria-current={activeSettings === label ? "page" : undefined}
+                    onClick={() => { setActiveSettings(label); setIsProfileMenuOpen(false); }}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button className="profile-menu__item profile-menu__item--logout" type="button" role="menuitem" onClick={() => { setIsProfileMenuOpen(false); onSignOut(); }}>
+                  <LogoutIcon />
+                  Log Out
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
       <section className="overview" id="overview">
         <div className="overview-copy">
-          <h1>{activeNav === "Tasks" ? "All Tasks" : activeNav === "Warehouses" ? "Warehouses" : "Operation Overview"}</h1>
-          <p>{activeNav === "Tasks" ? "Plan, assign and track every pickup, delivery and container." : activeNav === "Warehouses" ? <>Your three active Amazing Tiles warehouse<br className="desktop-break" /> locations.</> : <>Everything moving smoothly through your warehouse<br className="desktop-break" /> network today.</>}</p>
+          <h1>{activeSettings ? "Settings" : activeNav === "Tasks" ? "All Tasks" : activeNav === "Warehouses" ? "Warehouses" : "Operation Overview"}</h1>
+          <p>{activeSettings ? <>The settings and administrative features play a crucial<br className="desktop-break" /> role.</> : activeNav === "Tasks" ? "Plan, assign and track every pickup, delivery and container." : activeNav === "Warehouses" ? <>Your three active Amazing Tiles warehouse<br className="desktop-break" /> locations.</> : <>Everything moving smoothly through your warehouse<br className="desktop-break" /> network today.</>}</p>
         </div>
         <div className="overview-actions">
           <div className="date-block" aria-label="Saturday, August 19, 2026">
@@ -231,19 +684,20 @@ export default function Home() {
             <span>Sat,<br />August, 2026</span>
             <span className="date-chevron"><LayeredIcon kind="dropdown" /></span>
           </div>
-          {activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => setIsTaskPanelOpen(true)}>
+          {!activeSettings && activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => setIsTaskPanelOpen(true)}>
             <img src="/assets/icon-add.svg" alt="" /> Add new task
           </button> : null}
         </div>
       </section>
 
-      {activeNav === "Warehouses" ? (
+      {activeSettings ? (
+        <SettingsPage activeSection={activeSettings} onSectionChange={setActiveSettings} onSignOut={onSignOut} />
+      ) : activeNav === "Warehouses" ? (
         <section className="warehouse-grid" aria-label="Warehouse locations">
           {warehouses.map((warehouse) => (
             <article className="warehouse-card" key={warehouse.name}>
               <div className="warehouse-card__header">
                 <span className="warehouse-card__icon"><WarehouseCardIcon /></span>
-                {warehouse.status ? <span className={`warehouse-state warehouse-state--${warehouse.status.toLowerCase()}`}>{warehouse.status}</span> : null}
               </div>
               <div className="warehouse-card__body">
                 <span className="warehouse-office">{warehouse.office}</span>
@@ -293,7 +747,7 @@ export default function Home() {
                 View All Task <img src="/assets/icon-arrow-right.svg" alt="" />
               </button>
             </div>
-            <TaskTable tasks={visibleTasks} />
+            <TaskTable tasks={visibleTasks} onSelect={(task) => { setSelectedOrder(task); setIsOrderEditing(false); }} />
           </section>
         </>
       )}
@@ -402,6 +856,83 @@ export default function Home() {
           </aside>
         </div>
       ) : null}
+
+      {selectedOrder ? (
+        <div className="order-panel-backdrop" onMouseDown={() => { setSelectedOrder(null); setIsOrderEditing(false); }}>
+          <aside
+            className="order-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="order-details-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="order-panel__content">
+              <div className="order-panel__header">
+                <div className="order-panel__title-row">
+                  <h2 id="order-details-title">Order Details</h2>
+                  <button className={`order-edit-button ${isOrderEditing ? "order-edit-button--active" : ""}`} type="button" onClick={() => setIsOrderEditing((value) => !value)}>
+                    <img src="/assets/icon-edit.svg" alt="" />
+                    {isOrderEditing ? "Done" : "Edit"}
+                  </button>
+                </div>
+                <button className="order-panel__close" type="button" aria-label="Close order details" onClick={() => { setSelectedOrder(null); setIsOrderEditing(false); }}>
+                  <img src="/assets/icon-close.svg" alt="" />
+                </button>
+              </div>
+
+              <div className={`order-details ${isOrderEditing ? "order-details--editing" : ""}`}>
+                {[
+                  ["Invoice No.", selectedOrder.invoice],
+                  ["Schedule date", selectedOrder.invoice === "INV-10458" ? "23 June 2026, 10:00 PM" : selectedOrder.scheduled],
+                  ["Type", selectedOrder.type],
+                  ["Warehouse", selectedOrder.invoice === "INV-10458" ? "Sunshine" : selectedOrder.warehouse],
+                  ["Assigned to", selectedOrder.invoice === "INV-10458" ? "Dipu Khan" : selectedOrder.assignee],
+                ].map(([label, value]) => (
+                  <label className="order-detail-row" key={label}>
+                    <span>{label}</span>
+                    {isOrderEditing ? <input defaultValue={value} aria-label={label} /> : <strong>{value}</strong>}
+                  </label>
+                ))}
+
+                <div className="order-description">
+                  <div className="order-section-title"><span>Descriptions</span><span className="order-section-chevron"><LayeredIcon kind="dropdown" /></span></div>
+                  {isOrderEditing ? (
+                    <textarea aria-label="Descriptions" defaultValue="Here's a quick rundown of your order and operations: everything's running smoothly in your warehouse today! You can easily plan, assign, and keep tabs on every pickup, delivery, and container." />
+                  ) : (
+                    <p>Here&apos;s a quick rundown of your order and operations: everything&apos;s running smoothly in your warehouse today! You can easily plan, assign, and keep tabs on every pickup, delivery, and container.</p>
+                  )}
+                </div>
+
+                <div className="order-items">
+                  <h3>Items &amp; Quantity</h3>
+                  <div className="order-items__table" role="table" aria-label="Items and quantities">
+                    <div className="order-items__row order-items__row--header" role="row"><span role="columnheader">Name</span><span role="columnheader">Quantity</span></div>
+                    {[["Gray Tiles", "07"], ["Blue Tiles", "08"], ["Green Tiles", "12"], ["Yellow Tiles", "10"]].map(([name, quantity]) => (
+                      <div className="order-items__row" role="row" key={name}>
+                        <span role="cell">{isOrderEditing ? <input defaultValue={name} aria-label={`${name} name`} /> : name}</span>
+                        <span role="cell">{isOrderEditing ? <input defaultValue={quantity} aria-label={`${name} quantity`} /> : quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {isOrderEditing ? (
+              <div className="order-panel__actions">
+                <button type="button" onClick={() => setIsOrderEditing(false)}>Cancel</button>
+                <button type="button" onClick={() => setIsOrderEditing(false)}>Save change</button>
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      ) : null}
     </main>
   );
+}
+
+export default function Home() {
+  const [isSignedIn, setIsSignedIn] = useState(false);
+
+  return isSignedIn ? <Dashboard onSignOut={() => setIsSignedIn(false)} /> : <LoginScreen onSignIn={() => setIsSignedIn(true)} />;
 }
