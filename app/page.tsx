@@ -1184,8 +1184,8 @@ function WarehouseTeamDashboard({ onSignOut }: { onSignOut: () => void }) {
           </div>
 
           <div className="team-task-list__items">
-            {visibleTasks.map((task) => (
-              <article className="team-task-card" key={task.invoice}>
+            {visibleTasks.map((task, taskIndex) => (
+              <article className={`team-task-card ${openStatusInvoice === task.invoice ? "team-task-card--status-open" : ""}`} key={task.invoice}>
                 <button className="team-task-card__open" type="button" onClick={() => openOrder(task)} aria-label={`Open ${task.invoice} order details`}>
                   <span className="team-task-card__icon"><img src="/assets/icon-tasks.svg" alt="" /></span>
                   <span className="team-task-card__copy">
@@ -1213,7 +1213,7 @@ function WarehouseTeamDashboard({ onSignOut }: { onSignOut: () => void }) {
                     <span><LayeredIcon kind="dropdown" /></span>
                   </button>
                   {openStatusInvoice === task.invoice ? (
-                    <div className="team-status-menu" role="menu" aria-label={`Update ${task.invoice} status`}>
+                    <div className={`team-status-menu ${taskIndex === visibleTasks.length - 1 ? "team-status-menu--up" : ""}`} role="menu" aria-label={`Update ${task.invoice} status`}>
                       {(["Complete", "In Progress", "Delayed"] as TeamTaskStatus[]).map((status) => (
                         <button
                           className={task.status === status ? "team-status-menu__item team-status-menu__item--active" : "team-status-menu__item"}
