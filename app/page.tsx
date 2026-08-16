@@ -25,6 +25,21 @@ type Task = {
   status: Status;
 };
 
+type TeamTaskStatus = "Complete" | "In Progress" | "Delayed" | "Scheduled";
+type TeamView = "My Task" | "Warehouses Network";
+type TeamScope = "My warehouse" | "All warehouses";
+
+type TeamTask = {
+  invoice: string;
+  title: string;
+  summary: string;
+  date: string;
+  time: string;
+  location: string;
+  status: TeamTaskStatus;
+  priority?: "Low";
+};
+
 const initialTasks: Task[] = [
   { invoice: "INV-10458", type: "Delivery", warehouse: "Hoppers Crossing", assignee: "Ehsanul Islam", avatar: "/assets/avatar-ehsanul.png", scheduled: "25 Jul, 2026", status: "Ready" },
   { invoice: "INV-10459", type: "Pickup", warehouse: "Sunshine", assignee: "Ryan Kim", avatar: "/assets/avatar-ryan.png", scheduled: "26 Jul, 2026", status: "Pending" },
@@ -88,9 +103,49 @@ const stats = [
 ];
 
 const warehouses = [
-  { office: "Head Office", name: "Sunshine", address: "616 Somerville Road, Sunshine West VIC 3020", statOne: "03", labelOne: "Active tasks", statTwo: "02", labelTwo: "Ready now" },
-  { office: "Regional Office", name: "Geelong", address: "45 Corio Bay Road, Geelong VIC 3220", statOne: "04", labelOne: "In progress", statTwo: "05", labelTwo: "Awaiting approval" },
-  { office: "Branch Office", name: "Ballarat", address: "89 Lydiard Street, Ballarat VIC 3350", statOne: "05", labelOne: "Completed tasks", statTwo: "01", labelTwo: "Not started" },
+  { office: "Head Office", name: "Sunshine", address: "616 Somerville Road, Sunshine West VIC 3020", statOne: "03", labelOne: "Active tasks", statTwo: "02", labelTwo: "Ready now", accessStatus: null },
+  { office: "Regional Office", name: "Geelong", address: "45 Corio Bay Road, Geelong VIC 3220", statOne: "04", labelOne: "In progress", statTwo: "05", labelTwo: "Awaiting approval", accessStatus: "Pending" },
+  { office: "Branch Office", name: "Ballarat", address: "89 Lydiard Street, Ballarat VIC 3350", statOne: "05", labelOne: "Completed tasks", statTwo: "01", labelTwo: "Not started", accessStatus: "Rejected" },
+];
+
+const initialTeamTasks: TeamTask[] = [
+  {
+    invoice: "INV-10482",
+    title: "Calacatta Cloud tiles for Hawthorn Renovations",
+    summary: "24 boxes tiles · 5 bags adhesive",
+    date: "25 Jul",
+    time: "9:00 AM",
+    location: "Sunshine",
+    status: "Complete",
+  },
+  {
+    invoice: "INV-10483",
+    title: "Crown Molding Installation for Downtown Office",
+    summary: "50 ft molding · 10 tubes adhesive",
+    date: "26 Jul",
+    time: "10:30 AM",
+    location: "Central",
+    status: "In Progress",
+  },
+  {
+    invoice: "INV-10484",
+    title: "Exterior Painting for Riverside Apartments",
+    summary: "30 gallons paint · 5 brushes",
+    date: "27 Jul",
+    time: "1:00 PM",
+    location: "Riverside",
+    status: "Delayed",
+  },
+  {
+    invoice: "INV-10485",
+    title: "Landscape Design for Maple Park",
+    summary: "15 shrubs · 20 bags soil",
+    date: "28 Jul",
+    time: "11:00 AM",
+    location: "Maple",
+    status: "Scheduled",
+    priority: "Low",
+  },
 ];
 
 function LayeredIcon({ kind }: { kind: string }) {
@@ -214,14 +269,97 @@ function TaskTable({ tasks, onSelect }: { tasks: Task[]; onSelect?: (task: Task)
   );
 }
 
-function LoginScreen({ onSignIn }: { onSignIn: () => void }) {
+function OrderDetailsDrawer({
+  order,
+  isEditing,
+  onEditingChange,
+  onClose,
+}: {
+  order: Task;
+  isEditing: boolean;
+  onEditingChange: (editing: boolean) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="order-panel-backdrop" onMouseDown={onClose}>
+      <aside
+        className="order-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="order-details-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="order-panel__content">
+          <div className="order-panel__header">
+            <div className="order-panel__title-row">
+              <h2 id="order-details-title">Order Details</h2>
+              <button className={`order-edit-button ${isEditing ? "order-edit-button--active" : ""}`} type="button" onClick={() => onEditingChange(!isEditing)}>
+                <img src="/assets/icon-edit.svg" alt="" />
+                {isEditing ? "Done" : "Edit"}
+              </button>
+            </div>
+            <button className="order-panel__close" type="button" aria-label="Close order details" onClick={onClose}>
+              <img src="/assets/icon-close.svg" alt="" />
+            </button>
+          </div>
+
+          <div className={`order-details ${isEditing ? "order-details--editing" : ""}`}>
+            {[
+              ["Invoice No.", order.invoice],
+              ["Schedule date", order.invoice === "INV-10458" || order.invoice === "INV-10482" ? "23 June 2026, 10:00 PM" : order.scheduled],
+              ["Type", order.type],
+              ["Warehouse", order.invoice === "INV-10458" || order.invoice === "INV-10482" ? "Sunshine" : order.warehouse],
+              ["Assigned to", order.invoice === "INV-10458" || order.invoice === "INV-10482" ? "Dipu Khan" : order.assignee],
+            ].map(([label, value]) => (
+              <label className="order-detail-row" key={label}>
+                <span>{label}</span>
+                {isEditing ? <input defaultValue={value} aria-label={label} /> : <strong>{value}</strong>}
+              </label>
+            ))}
+
+            <div className="order-description">
+              <div className="order-section-title"><span>Descriptions</span><span className="order-section-chevron"><LayeredIcon kind="dropdown" /></span></div>
+              {isEditing ? (
+                <textarea aria-label="Descriptions" defaultValue="Here's a quick rundown of your order and operations: everything's running smoothly in your warehouse today! You can easily plan, assign, and keep tabs on every pickup, delivery, and container." />
+              ) : (
+                <p>Here&apos;s a quick rundown of your order and operations: everything&apos;s running smoothly in your warehouse today! You can easily plan, assign, and keep tabs on every pickup, delivery, and container.</p>
+              )}
+            </div>
+
+            <div className="order-items">
+              <h3>Items &amp; Quantity</h3>
+              <div className="order-items__table" role="table" aria-label="Items and quantities">
+                <div className="order-items__row order-items__row--header" role="row"><span role="columnheader">Name</span><span role="columnheader">Quantity</span></div>
+                {[["Gray Tiles", "07"], ["Blue Tiles", "08"], ["Green Tiles", "12"], ["Yellow Tiles", "10"]].map(([name, quantity]) => (
+                  <div className="order-items__row" role="row" key={name}>
+                    <span role="cell">{isEditing ? <input defaultValue={name} aria-label={`${name} name`} /> : name}</span>
+                    <span role="cell">{isEditing ? <input defaultValue={quantity} aria-label={`${name} quantity`} /> : quantity}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {isEditing ? (
+          <div className="order-panel__actions">
+            <button type="button" onClick={() => onEditingChange(false)}>Cancel</button>
+            <button type="button" onClick={() => onEditingChange(false)}>Save change</button>
+          </div>
+        ) : null}
+      </aside>
+    </div>
+  );
+}
+
+function LoginScreen({ onSignIn }: { onSignIn: (accessType: AccessType) => void }) {
   const [accessType, setAccessType] = useState<AccessType>("Manager");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(false);
 
   function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSignIn();
+    onSignIn(accessType);
   }
 
   return (
@@ -858,81 +996,260 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       ) : null}
 
       {selectedOrder ? (
-        <div className="order-panel-backdrop" onMouseDown={() => { setSelectedOrder(null); setIsOrderEditing(false); }}>
-          <aside
-            className="order-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="order-details-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="order-panel__content">
-              <div className="order-panel__header">
-                <div className="order-panel__title-row">
-                  <h2 id="order-details-title">Order Details</h2>
-                  <button className={`order-edit-button ${isOrderEditing ? "order-edit-button--active" : ""}`} type="button" onClick={() => setIsOrderEditing((value) => !value)}>
-                    <img src="/assets/icon-edit.svg" alt="" />
-                    {isOrderEditing ? "Done" : "Edit"}
-                  </button>
-                </div>
-                <button className="order-panel__close" type="button" aria-label="Close order details" onClick={() => { setSelectedOrder(null); setIsOrderEditing(false); }}>
-                  <img src="/assets/icon-close.svg" alt="" />
+        <OrderDetailsDrawer
+          order={selectedOrder}
+          isEditing={isOrderEditing}
+          onEditingChange={setIsOrderEditing}
+          onClose={() => { setSelectedOrder(null); setIsOrderEditing(false); }}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function WarehouseTeamDashboard({ onSignOut }: { onSignOut: () => void }) {
+  const [activeView, setActiveView] = useState<TeamView>("My Task");
+  const [scope, setScope] = useState<TeamScope>("My warehouse");
+  const [tasks, setTasks] = useState(initialTeamTasks);
+  const [openStatusInvoice, setOpenStatusInvoice] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<Task | null>(null);
+  const [isOrderEditing, setIsOrderEditing] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function closeTransientUi(event: PointerEvent) {
+      if (!profileMenuRef.current?.contains(event.target as Node)) setIsProfileMenuOpen(false);
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest(".team-status-wrap")) setOpenStatusInvoice(null);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setIsProfileMenuOpen(false);
+      setOpenStatusInvoice(null);
+      setSelectedOrder(null);
+      setIsOrderEditing(false);
+    }
+
+    document.addEventListener("pointerdown", closeTransientUi);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeTransientUi);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  const visibleTasks = scope === "My warehouse" ? tasks.slice(0, 2) : tasks;
+
+  function openOrder(task: TeamTask) {
+    setSelectedOrder({
+      invoice: task.invoice,
+      type: "Delivery",
+      warehouse: task.location,
+      assignee: "Dipu Khan",
+      avatar: "/assets/avatar-ramie.png",
+      scheduled: `${task.date}, 2026 · ${task.time}`,
+      status: task.status === "Delayed" ? "Delayed" : task.status === "In Progress" ? "Pending" : "Ready",
+    });
+    setIsOrderEditing(false);
+  }
+
+  function updateTaskStatus(invoice: string, status: TeamTaskStatus) {
+    setTasks((current) => current.map((task) => task.invoice === invoice ? { ...task, status } : task));
+    setOpenStatusInvoice(null);
+  }
+
+  return (
+    <main className="dashboard-shell team-dashboard">
+      <header className="topbar team-topbar">
+        <a className="brand" href="#team-overview" aria-label="Amazing Operations home" onClick={() => { setActiveView("My Task"); setScope("My warehouse"); }}>
+          <span className="brand__mark-wrap"><img className="brand__mark" src="/assets/logo-mark.svg" alt="" /></span>
+          <img className="brand__word" src="/assets/logo-wordmark.svg" alt="Amazing Operations" />
+        </a>
+
+        <nav className="main-nav team-nav" aria-label="Warehouse Team navigation">
+          {([
+            { label: "My Task" as TeamView, icon: "tasks" },
+            { label: "Warehouses Network" as TeamView, icon: "warehouse" },
+          ]).map((item) => (
+            <button
+              className={`nav-button team-nav__button ${activeView === item.label ? "nav-button--active" : ""}`}
+              key={item.label}
+              type="button"
+              aria-current={activeView === item.label ? "page" : undefined}
+              onClick={() => setActiveView(item.label)}
+            >
+              <LayeredIcon kind={item.icon} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="user-actions">
+          <button className="circle-button" type="button" aria-label="View notifications"><img src="/assets/icon-bell-exact.svg" alt="" /></button>
+          <div className="profile-menu-wrap" ref={profileMenuRef}>
+            <button
+              className="profile-button"
+              type="button"
+              aria-label={isProfileMenuOpen ? "Close profile menu" : "Open profile menu"}
+              aria-haspopup="menu"
+              aria-expanded={isProfileMenuOpen}
+              onClick={() => setIsProfileMenuOpen((open) => !open)}
+            >
+              <img src="/assets/avatar-ramie.png" alt="Ramie Shelbie" />
+              <span><strong>Ramie Shelbie</strong><small>tomashelbie@gmail.com</small></span>
+              <span className="chevron"><LayeredIcon kind="dropdown" /></span>
+            </button>
+            {isProfileMenuOpen ? (
+              <div className="profile-menu team-profile-menu" role="menu" aria-label="Warehouse Team profile">
+                <button className="profile-menu__item profile-menu__item--logout" type="button" role="menuitem" onClick={onSignOut}>
+                  <LogoutIcon />
+                  Log Out
                 </button>
               </div>
-
-              <div className={`order-details ${isOrderEditing ? "order-details--editing" : ""}`}>
-                {[
-                  ["Invoice No.", selectedOrder.invoice],
-                  ["Schedule date", selectedOrder.invoice === "INV-10458" ? "23 June 2026, 10:00 PM" : selectedOrder.scheduled],
-                  ["Type", selectedOrder.type],
-                  ["Warehouse", selectedOrder.invoice === "INV-10458" ? "Sunshine" : selectedOrder.warehouse],
-                  ["Assigned to", selectedOrder.invoice === "INV-10458" ? "Dipu Khan" : selectedOrder.assignee],
-                ].map(([label, value]) => (
-                  <label className="order-detail-row" key={label}>
-                    <span>{label}</span>
-                    {isOrderEditing ? <input defaultValue={value} aria-label={label} /> : <strong>{value}</strong>}
-                  </label>
-                ))}
-
-                <div className="order-description">
-                  <div className="order-section-title"><span>Descriptions</span><span className="order-section-chevron"><LayeredIcon kind="dropdown" /></span></div>
-                  {isOrderEditing ? (
-                    <textarea aria-label="Descriptions" defaultValue="Here's a quick rundown of your order and operations: everything's running smoothly in your warehouse today! You can easily plan, assign, and keep tabs on every pickup, delivery, and container." />
-                  ) : (
-                    <p>Here&apos;s a quick rundown of your order and operations: everything&apos;s running smoothly in your warehouse today! You can easily plan, assign, and keep tabs on every pickup, delivery, and container.</p>
-                  )}
-                </div>
-
-                <div className="order-items">
-                  <h3>Items &amp; Quantity</h3>
-                  <div className="order-items__table" role="table" aria-label="Items and quantities">
-                    <div className="order-items__row order-items__row--header" role="row"><span role="columnheader">Name</span><span role="columnheader">Quantity</span></div>
-                    {[["Gray Tiles", "07"], ["Blue Tiles", "08"], ["Green Tiles", "12"], ["Yellow Tiles", "10"]].map(([name, quantity]) => (
-                      <div className="order-items__row" role="row" key={name}>
-                        <span role="cell">{isOrderEditing ? <input defaultValue={name} aria-label={`${name} name`} /> : name}</span>
-                        <span role="cell">{isOrderEditing ? <input defaultValue={quantity} aria-label={`${name} quantity`} /> : quantity}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {isOrderEditing ? (
-              <div className="order-panel__actions">
-                <button type="button" onClick={() => setIsOrderEditing(false)}>Cancel</button>
-                <button type="button" onClick={() => setIsOrderEditing(false)}>Save change</button>
-              </div>
             ) : null}
-          </aside>
+          </div>
         </div>
+      </header>
+
+      <section className="overview team-overview" id="team-overview">
+        <div className="overview-copy">
+          <h1>{activeView === "Warehouses Network" ? "My Warehouses" : scope === "All warehouses" ? "My Tasks" : "Task Overview"}</h1>
+          <p>Your Sunshine tasks are pinned first. Update them as work progresses.</p>
+        </div>
+        <div className="date-block" aria-label="Saturday, August 19, 2026">
+          <span className="date-number">19</span>
+          <span>Sat,<br />August, 2026</span>
+          <span className="date-chevron"><LayeredIcon kind="dropdown" /></span>
+        </div>
+      </section>
+
+      {activeView === "My Task" && scope === "My warehouse" ? (
+        <section className="stats-grid team-stats" aria-label="Today’s task summary">
+          {stats.map((stat) => (
+            <article className="stat-card" key={stat.label}>
+              <div className={`stat-label stat-label--${stat.tone}`}><LayeredIcon kind={stat.icon} /> {stat.label === "Pending Today" ? "Pending Task" : stat.label}</div>
+              <strong>{stat.value}</strong>
+              <span className={`stat-note stat-note--${stat.tone}`}>{stat.note}</span>
+            </article>
+          ))}
+        </section>
+      ) : null}
+
+      <section className="team-scope-row" aria-label="Warehouse task scope">
+        <div className="team-segmented">
+          {(["My warehouse", "All warehouses"] as TeamScope[]).map((option) => (
+            <button
+              className={scope === option ? "team-segmented__button team-segmented__button--active" : "team-segmented__button"}
+              type="button"
+              key={option}
+              aria-pressed={scope === option}
+              onClick={() => setScope(option)}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+        <div className="team-online"><span aria-hidden="true" />Sunshine · Abdur Rahman · Online</div>
+      </section>
+
+      {activeView === "Warehouses Network" ? (
+        <section className="warehouse-grid team-warehouse-grid" aria-label="Warehouse network">
+          {warehouses.map((warehouse) => (
+            <article className="warehouse-card team-warehouse-card" key={warehouse.name}>
+              <div className="warehouse-card__header">
+                <span className="warehouse-card__icon"><WarehouseCardIcon /></span>
+                {warehouse.accessStatus ? <span className={`warehouse-access warehouse-access--${warehouse.accessStatus.toLowerCase()}`}>{warehouse.accessStatus}</span> : null}
+              </div>
+              <div className="warehouse-card__body">
+                <span className="warehouse-office">{warehouse.office}</span>
+                <h2>{warehouse.name}</h2>
+                <p className="warehouse-address"><img src="/assets/icon-location.svg" alt="" />{warehouse.address}</p>
+                <div className="warehouse-stats">
+                  <div><strong>{warehouse.statOne}</strong><span>{warehouse.labelOne}</span></div>
+                  <div><strong>{warehouse.statTwo}</strong><span>{warehouse.labelTwo}</span></div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <section className="team-task-list" aria-labelledby="team-task-list-title">
+          <div className="team-task-list__heading">
+            <span aria-hidden="true" />
+            <h2 id="team-task-list-title">Today</h2>
+            <small>{visibleTasks.length} Task</small>
+            <span aria-hidden="true" />
+          </div>
+
+          <div className="team-task-list__items">
+            {visibleTasks.map((task) => (
+              <article className="team-task-card" key={task.invoice}>
+                <button className="team-task-card__open" type="button" onClick={() => openOrder(task)} aria-label={`Open ${task.invoice} order details`}>
+                  <span className="team-task-card__icon"><img src="/assets/icon-tasks.svg" alt="" /></span>
+                  <span className="team-task-card__copy">
+                    <span className="team-task-card__invoice">{task.invoice}</span>
+                    <strong>{task.title}</strong>
+                    <span className="team-task-card__summary">{task.summary}</span>
+                    <span className="team-task-card__meta">
+                      <span><img src="/assets/icon-calendar.svg" alt="" />{task.date}</span>
+                      <span><img src="/assets/icon-clock.svg" alt="" />{task.time}</span>
+                      <span><img src="/assets/icon-location.svg" alt="" />{task.location}</span>
+                      {task.priority ? <span className="team-priority">{task.priority} priority</span> : null}
+                    </span>
+                  </span>
+                </button>
+
+                <div className="team-status-wrap">
+                  <button
+                    className={`team-status-button team-status-button--${task.status.toLowerCase().replace(" ", "-")}`}
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={openStatusInvoice === task.invoice}
+                    onClick={() => setOpenStatusInvoice((open) => open === task.invoice ? null : task.invoice)}
+                  >
+                    {task.status}
+                    <span><LayeredIcon kind="dropdown" /></span>
+                  </button>
+                  {openStatusInvoice === task.invoice ? (
+                    <div className="team-status-menu" role="menu" aria-label={`Update ${task.invoice} status`}>
+                      {(["Complete", "In Progress", "Delayed"] as TeamTaskStatus[]).map((status) => (
+                        <button
+                          className={task.status === status ? "team-status-menu__item team-status-menu__item--active" : "team-status-menu__item"}
+                          type="button"
+                          role="menuitem"
+                          key={status}
+                          onClick={() => updateTaskStatus(task.invoice, status)}
+                        >
+                          {status}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {selectedOrder ? (
+        <OrderDetailsDrawer
+          order={selectedOrder}
+          isEditing={isOrderEditing}
+          onEditingChange={setIsOrderEditing}
+          onClose={() => { setSelectedOrder(null); setIsOrderEditing(false); }}
+        />
       ) : null}
     </main>
   );
 }
 
 export default function Home() {
-  const [isSignedIn, setIsSignedIn] = useState(false);
+  const [activeAccess, setActiveAccess] = useState<AccessType | null>(null);
 
-  return isSignedIn ? <Dashboard onSignOut={() => setIsSignedIn(false)} /> : <LoginScreen onSignIn={() => setIsSignedIn(true)} />;
+  if (activeAccess === "Manager") return <Dashboard onSignOut={() => setActiveAccess(null)} />;
+  if (activeAccess === "Warehouse Team") return <WarehouseTeamDashboard onSignOut={() => setActiveAccess(null)} />;
+  return <LoginScreen onSignIn={setActiveAccess} />;
 }
