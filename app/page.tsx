@@ -103,9 +103,9 @@ const stats = [
 ];
 
 const warehouses = [
-  { office: "Head Office", name: "Sunshine", address: "616 Somerville Road, Sunshine West VIC 3020", statOne: "03", labelOne: "Active tasks", statTwo: "02", labelTwo: "Ready now", accessStatus: null },
-  { office: "Regional Office", name: "Geelong", address: "45 Corio Bay Road, Geelong VIC 3220", statOne: "04", labelOne: "In progress", statTwo: "05", labelTwo: "Awaiting approval", accessStatus: "Pending" },
-  { office: "Branch Office", name: "Ballarat", address: "89 Lydiard Street, Ballarat VIC 3350", statOne: "05", labelOne: "Completed tasks", statTwo: "01", labelTwo: "Not started", accessStatus: "Rejected" },
+  { office: "Head Office", name: "Sunshine", address: "616 Somerville Road, Sunshine West VIC 3020", statOne: "03", labelOne: "Active tasks", statTwo: "02", labelTwo: "Ready now" },
+  { office: "Regional Office", name: "Geelong", address: "45 Corio Bay Road, Geelong VIC 3220", statOne: "04", labelOne: "In progress", statTwo: "05", labelTwo: "Awaiting approval" },
+  { office: "Branch Office", name: "Ballarat", address: "89 Lydiard Street, Ballarat VIC 3350", statOne: "05", labelOne: "Completed tasks", statTwo: "01", labelTwo: "Not started" },
 ];
 
 const initialTeamTasks: TeamTask[] = [
@@ -353,7 +353,7 @@ function OrderDetailsDrawer({
 }
 
 function LoginScreen({ onSignIn }: { onSignIn: (accessType: AccessType) => void }) {
-  const [accessType, setAccessType] = useState<AccessType>("Manager");
+  const [accessType, setAccessType] = useState<AccessType>("Warehouse Team");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(false);
 
@@ -365,32 +365,24 @@ function LoginScreen({ onSignIn }: { onSignIn: (accessType: AccessType) => void 
   return (
     <main className="login-shell">
       <section className="login-hero" aria-label="Amazing Operations onboarding">
-        <div className="login-brand" aria-label="Amazing Operations">
-          <span className="login-brand__mark"><img src="/assets/login-logo-mark-white.svg" alt="" /></span>
-          <img className="login-brand__word" src="/assets/login-logo-wordmark-white.svg" alt="Amazing Operations" />
-        </div>
-        <div className="login-hero__copy">
-          <div>
-            <p>One connected operation</p>
-            <h2>Every warehouse.<br />One clear plan.</h2>
+        <img
+          className="login-hero__photo"
+          src="/assets/login-warehouse-team-v2.png"
+          alt="Warehouse team members reviewing operations on a tablet"
+        />
+        <div className="login-hero__story">
+          <div className="login-brand" aria-label="Amazing Operations">
+            <span className="login-brand__mark"><img src="/assets/login-logo-mark-white.svg" alt="" /></span>
+            <img className="login-brand__word" src="/assets/login-logo-wordmark-white.svg" alt="Amazing Operations" />
           </div>
-          <p>Keep pickups, deliveries, container arrivals and stock transfers organised across Sunshine, Hoppers Crossing and Melton.</p>
-        </div>
-        <div className="login-feature" aria-label="Warehouse operations preview">
-          <img className="login-feature__photo" src="/assets/login-team-photo.png" alt="Team members reviewing a stone tile in the showroom" />
-          <div className="login-feature__tag login-feature__tag--overview">
-            <span className="login-feature__overview-icon" aria-hidden="true">
-              <img src="/assets/icon-login-overview-main.svg" alt="" />
-              <img src="/assets/icon-login-overview-detail.svg" alt="" />
-            </span>
-            <span>Work Overview</span>
-          </div>
-          <div className="login-feature__tag login-feature__tag--task">
-            <img src="/assets/icon-login-document.svg" alt="" />
-            <span>Assign Task</span>
+          <div className="login-hero__copy">
+            <div>
+              <p>One connected operation</p>
+              <h2>Every warehouse.<br />One clear plan.</h2>
+            </div>
+            <p>Keep pickups, deliveries, container arrivals and stock transfers organised across Sunshine, Hoppers Crossing and Melton.</p>
           </div>
         </div>
-        <div className="login-carousel-dots" aria-hidden="true"><span /><span /><span /></div>
       </section>
 
       <section className="login-panel" aria-labelledby="login-title">
@@ -401,6 +393,7 @@ function LoginScreen({ onSignIn }: { onSignIn: (accessType: AccessType) => void 
                 <p className="login-eyebrow">Welcome back</p>
                 <h1 id="login-title">Sign in to Operations</h1>
               </div>
+              <div className="login-header__rule" aria-hidden="true"><span /></div>
               <p>Choose your access type to continue.</p>
             </div>
 
@@ -1160,7 +1153,6 @@ function WarehouseTeamDashboard({ onSignOut }: { onSignOut: () => void }) {
             <article className="warehouse-card team-warehouse-card" key={warehouse.name}>
               <div className="warehouse-card__header">
                 <span className="warehouse-card__icon"><WarehouseCardIcon /></span>
-                {warehouse.accessStatus ? <span className={`warehouse-access warehouse-access--${warehouse.accessStatus.toLowerCase()}`}>{warehouse.accessStatus}</span> : null}
               </div>
               <div className="warehouse-card__body">
                 <span className="warehouse-office">{warehouse.office}</span>
