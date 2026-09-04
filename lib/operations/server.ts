@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   ActionResult,
@@ -49,14 +50,15 @@ function mapStaff(rowValue: unknown): StaffDTO {
     status: ["uninvited", "invited", "active", "suspended", "archived"].includes(String(row.status))
       ? row.status as StaffDTO["status"]
       : "uninvited",
-    avatarUrl: String(row.avatar_url || "/assets/avatar-james.png"),
     location: String(row.location || "Melbourne, Australia"),
+    gender: row.gender === "Male" || row.gender === "Female" ? row.gender : "Prefer not to say",
+    dateOfBirth: row.date_of_birth ? String(row.date_of_birth) : null,
     warehouseIds: asArray(row.staff_warehouses).map((membership) => String(asObject(membership).warehouse_id ?? "")).filter(Boolean),
     archivedAt: row.archived_at ? String(row.archived_at) : null,
   };
 }
 
-function mapTask(rowValue: unknown): TaskDTO {
+function mapTask(rowValue: unknown, staffNames: ReadonlyMap<string, string>): TaskDTO {
   const row = asObject(rowValue);
   const warehouse = asObject(row.warehouse);
   const items: TaskItemDTO[] = asArray(row.items).map((itemValue) => {
@@ -69,23 +71,22 @@ function mapTask(rowValue: unknown): TaskDTO {
     };
   });
   const assignees: TaskAssigneeDTO[] = asArray(row.assignments).flatMap((assignmentValue) => {
-    const staff = asObject(asObject(assignmentValue).staff);
-    if (!staff.id) return [];
+    const assignment = asObject(assignmentValue);
+    const staffId = String(assignment.staff_id ?? "");
+    if (!staffId) return [];
     return [{
-      id: String(staff.id),
-      fullName: String(staff.full_name ?? ""),
-      email: String(staff.email ?? ""),
-      avatarUrl: String(staff.avatar_url || "/assets/avatar-james.png"),
+      id: staffId,
+      fullName: staffNames.get(staffId) ?? "Former team member",
     }];
   });
   const notes: TaskNoteDTO[] = asArray(row.notes).map((noteValue) => {
     const note = asObject(noteValue);
-    const author = asObject(note.author);
+    const authorId = String(note.author_id ?? "");
     return {
       id: String(note.id ?? ""),
       body: String(note.body ?? ""),
-      authorId: String(note.author_id ?? ""),
-      authorName: String(author.full_name || "Operations team"),
+      authorId,
+      authorName: staffNames.get(authorId) ?? "Operations team",
       createdAt: String(note.created_at ?? ""),
     };
   });
@@ -128,7 +129,7 @@ export async function getAuthenticatedContext(): Promise<ActionResult<Authentica
 
   const { data, error } = await supabase
     .from("staff_profiles")
-    .select("*, staff_warehouses(warehouse_id)")
+    .select("id, auth_user_id, full_name, email, role, status, location, gender, date_of_birth, archived_at, staff_warehouses(warehouse_id)")
     .eq("auth_user_id", userData.user.id)
     .maybeSingle();
   if (error) return { ok: false, error: "We could not load your account.", code: error.code };
@@ -160,11 +161,13 @@ export async function loadOperationsSnapshot(): Promise<ActionResult<OperationsS
       id, invoice, type, warehouse_id, scheduled_at, status, description, priority, version, archived_at,
       warehouse:warehouses(id, name),
       items:task_items(id, name, quantity, sort_order),
-      assignments:task_assignees(staff:staff_profiles!task_assignees_staff_id_fkey(id, full_name, email, avatar_url)),
-      notes:task_notes(id, author_id, body, created_at, author:staff_profiles(id, full_name))
+      assignments:task_assignees(staff_id),
+      notes:task_notes(id, author_id, body, created_at)
     `).order("scheduled_at", { ascending: true }),
     supabase.from("warehouses").select("id, office_type, name, address, status, archived_at").order("name"),
-    supabase.from("staff_profiles").select("*, staff_warehouses(warehouse_id)").order("full_name"),
+    profile.role === "manager"
+      ? supabase.from("staff_profiles").select("id, auth_user_id, full_name, email, role, status, location, gender, date_of_birth, archived_at, staff_warehouses(warehouse_id)").order("full_name")
+      : Promise.resolve({ data: [], error: null }),
     supabase.from("notifications").select("id, event, title, body, task_id, read_at, created_at").eq("staff_id", profile.id).order("created_at", { ascending: false }).limit(100),
     supabase.from("notification_preferences").select("preferences").eq("staff_id", profile.id).maybeSingle(),
     profile.role === "manager"
@@ -174,6 +177,34 @@ export async function loadOperationsSnapshot(): Promise<ActionResult<OperationsS
 
   const firstError = tasksResult.error ?? warehousesResult.error ?? staffResult.error ?? noticesResult.error ?? preferencesResult.error ?? auditResult.error;
   if (firstError) return { ok: false, error: "Operations data could not be loaded.", code: firstError.code };
+
+  const taskRows = asArray(tasksResult.data);
+  const staffRows = asArray(staffResult.data);
+  const referencedStaffIds = Array.from(new Set(taskRows.flatMap((taskValue) => {
+    const task = asObject(taskValue);
+    const assigneeIds = asArray(task.assignments).map((assignmentValue) => String(asObject(assignmentValue).staff_id ?? ""));
+    const authorIds = asArray(task.notes).map((noteValue) => String(asObject(noteValue).author_id ?? ""));
+    return [...assigneeIds, ...authorIds].filter(Boolean);
+  })));
+  let staffNameRows = staffRows;
+  if (profile.role !== "manager" && referencedStaffIds.length) {
+    const admin = createSupabaseAdminClient();
+    if (!admin) {
+      return { ok: false, error: "The secure staff-name directory is not configured.", code: "NOT_CONFIGURED" };
+    }
+    const { data: directoryRows, error: directoryError } = await admin
+      .from("staff_name_directory")
+      .select("id, full_name")
+      .in("id", referencedStaffIds);
+    if (directoryError) {
+      return { ok: false, error: "Task staff names could not be loaded.", code: directoryError.code };
+    }
+    staffNameRows = asArray(directoryRows);
+  }
+  const staffNames = new Map(staffNameRows.map((staffValue) => {
+    const staff = asObject(staffValue);
+    return [String(staff.id ?? ""), String(staff.full_name ?? "")] as const;
+  }).filter(([id]) => Boolean(id)));
 
   const preferenceRow = asObject(preferencesResult.data);
   const preferences = { ...defaultPreferences, ...asObject(preferenceRow.preferences) } as NotificationPreferencesDTO;
@@ -212,9 +243,9 @@ export async function loadOperationsSnapshot(): Promise<ActionResult<OperationsS
     ok: true,
     data: {
       account: profile,
-      tasks: asArray(tasksResult.data).map(mapTask),
+      tasks: taskRows.map((task) => mapTask(task, staffNames)),
       warehouses: asArray(warehousesResult.data).map(mapWarehouse),
-      staff: asArray(staffResult.data).map(mapStaff),
+      staff: profile.role === "manager" ? staffRows.map(mapStaff) : [],
       notices,
       auditEvents,
       notificationPreferences: preferences,

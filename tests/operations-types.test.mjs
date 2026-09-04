@@ -35,3 +35,10 @@ test("the frontend does not restore demo persistence or staff presence", async (
   assert.match(source, /Forgot password/);
   assert.doesNotMatch(source, /Choose your access type/);
 });
+
+test("identity is rendered without photographic profile images", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /function IdentityMark/);
+  assert.doesNotMatch(source, /<img\s+src=\{(?:account|task|administrator)[^}]*\.avatar/);
+  assert.doesNotMatch(source, /admin-reference-avatar/);
+});

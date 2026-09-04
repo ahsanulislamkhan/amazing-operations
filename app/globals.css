@@ -99,8 +99,11 @@ button { color: inherit; }
 .profile-button { width: 250px; height: 56px; padding: 8px 12px 8px 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; display: flex; align-items: center; text-align: left; cursor: pointer; }
 .profile-button:focus { outline: none; }
 .profile-button:focus-visible, .circle-button:focus-visible, .nav-button:focus-visible, .primary-button:focus-visible, .secondary-button:focus-visible, .settings-actions button:focus-visible, .settings-add-button:focus-visible, .administrator-more:focus-visible, .team-segmented__button:focus-visible, .team-status-button:focus-visible, .warehouse-card--interactive:focus-visible { outline: 3px solid #007fb8; outline-offset: 3px; }
-.profile-button > img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
-.profile-button > span:not(.chevron) { min-width: 0; margin-left: 7px; display: flex; flex-direction: column; }
+.identity-mark { border: 1px solid #c8ebfa; border-radius: 50%; background: #e9f8fe; color: #007fb8; display: inline-grid; place-items: center; flex: 0 0 auto; font-weight: 700; letter-spacing: -.03em; user-select: none; }
+.identity-mark--small { width: 32px; height: 32px; font-size: 11px; }
+.identity-mark--medium { width: 40px; height: 40px; font-size: 13px; }
+.identity-mark--large { width: 100px; height: 100px; border-width: 2px; font-size: 28px; }
+.profile-button__copy { min-width: 0; margin-left: 7px; display: flex; flex-direction: column; }
 .profile-button strong { font-size: 16px; font-weight: 600; white-space: nowrap; }
 .profile-button small { max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
 .chevron { margin-left: auto; width: 20px; height: 20px; color: var(--muted); }
@@ -192,7 +195,6 @@ button { color: inherit; }
 .audit-table .administrators-row--head { text-transform: none; }
 .settings-empty-state { margin: 32px 0; color: var(--muted); }
 .administrator-name { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.administrator-name img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
 .administrator-status { display: inline-flex; align-items: center; gap: 6px; }
 .administrator-status img { width: 20px; height: 20px; object-fit: contain; }
 .administrator-more { width: 24px; height: 32px; padding: 0; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; }
@@ -222,10 +224,7 @@ button { color: inherit; }
 .administration-modal__header h2 { margin: 0; text-align: center; font-size: 18px; line-height: 24px; font-weight: 500; }
 .administration-modal__header button { width: 24px; height: 24px; padding: 0; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; }
 .administration-modal__header button img { width: 20px; height: 20px; object-fit: contain; }
-.administration-avatar { position: relative; width: 100px; height: 100px; margin: 24px auto; }
-.administration-avatar > img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
-.administration-avatar span { position: absolute; left: 40px; top: 40px; width: 20px; height: 20px; display: grid; place-items: center; }
-.administration-avatar span img { width: 20px; height: 20px; }
+.administration-avatar { width: 100px; height: 100px; margin: 24px auto; display: grid; place-items: center; }
 .administration-form { flex: 1; display: flex; flex-direction: column; }
 .administration-form h3 { margin: 0 0 16px; font-size: 18px; line-height: 24px; font-weight: 500; }
 .administration-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -234,6 +233,8 @@ button { color: inherit; }
 .administration-fields input::placeholder { color: #8190a4; opacity: 1; }
 .administration-fields select { padding-right: 42px; appearance: none; background: white url('/assets/icon-dropdown-path.svg') no-repeat right 20px center / 11px 6px; color: var(--muted); }
 .administration-fields input:focus, .administration-fields select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(0, 174, 243, .1); }
+.administration-fields input:disabled { background: #f8fafc; color: #64748b; cursor: not-allowed; }
+.administration-field-help { color: var(--muted); font-size: 12px; line-height: 16px; }
 .administration-form__actions { margin-top: auto; padding-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .administration-form__actions button { height: 56px; border-radius: 999px; cursor: pointer; }
 .administration-form__actions button:first-child { border: 1px solid #cad5e2; background: white; color: var(--muted); }
@@ -288,7 +289,6 @@ th:nth-child(6), td:nth-child(6) { width: 6.5%; }
 .task-type--delivery .task-type__icon { background: #ede9fe; }
 .task-type--pickup .task-type__icon { background: #fef9c2; }
 .task-type--container .task-type__icon { background: #ffedd4; }
-.assignee img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
 .status { min-width: 84px; padding: 7px 12px; border: 1px solid; border-radius: 999px; display: inline-block; text-align: center; font-size: 12px; }
 .status--ready { color: #00bc7d; background: #ecfdf5; border-color: #d0fae5; }
 .status--pending { color: #d08700; background: #fef9c2; border-color: #fff085; }
@@ -618,7 +618,7 @@ th:nth-child(6), td:nth-child(6) { width: 6.5%; }
   .user-actions { margin-left: auto; }
   .circle-button { width: 48px; height: 48px; }
   .profile-button { width: 56px; padding: 7px; }
-  .profile-button > span { display: none !important; }
+  .profile-button__copy, .profile-button .chevron { display: none !important; }
   .profile-menu { position: fixed; top: 80px; right: 16px; left: auto; width: min(307px, calc(100vw - 32px)); max-height: calc(100dvh - 96px); }
   .settings-card { min-height: 0; padding: 18px; border-radius: 24px; display: block; }
   .settings-sidebar { min-height: 0; padding: 0 0 18px; border-right: 0; border-bottom: 1px solid #f1f5f9; flex-direction: row; gap: 8px; overflow-x: auto; scrollbar-width: none; }

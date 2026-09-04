@@ -26,8 +26,9 @@ export type StaffDTO = {
   email: string;
   role: AppRole;
   status: StaffStatus;
-  avatarUrl: string;
   location: string;
+  gender: "Male" | "Female" | "Prefer not to say";
+  dateOfBirth: string | null;
   warehouseIds: string[];
   archivedAt: string | null;
 };
@@ -56,7 +57,7 @@ export type TaskNoteDTO = {
   createdAt: string;
 };
 
-export type TaskAssigneeDTO = Pick<StaffDTO, "id" | "fullName" | "email" | "avatarUrl">;
+export type TaskAssigneeDTO = Pick<StaffDTO, "id" | "fullName">;
 
 export type TaskDTO = {
   id: string;
@@ -115,6 +116,16 @@ export type OperationsSnapshot = {
 export type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string; code?: string };
+
+export type CreateStaffInviteResult =
+  | { ok: true; data: OperationsSnapshot }
+  | {
+      ok: false;
+      error: string;
+      code?: string;
+      profileCreated: boolean;
+      data?: OperationsSnapshot;
+    };
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   pending: "Pending",

@@ -3,11 +3,12 @@
 import { Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DateFilter from "./components/DateFilter";
-import type { AuditEventDTO, DateRange, NotificationPreferencesDTO, OperationsSnapshot, TaskDTO } from "@/lib/operations/types";
+import type { ActionResult, AuditEventDTO, DateRange, NotificationPreferencesDTO, OperationsSnapshot, StaffStatus, TaskDTO } from "@/lib/operations/types";
 import { canTeamTransition } from "@/lib/operations/types";
 import { changePasswordAction, signInAction, signOutAction } from "./actions/auth";
 import {
   archiveTaskAction,
+  createAndInviteStaffAction,
   createTaskAction,
   inviteStaffAction,
   loadOperationsAction,
@@ -44,10 +45,12 @@ type TaskItem = {
 
 type Administrator = {
   id: string;
+  authUserId: string | null;
   name: string;
   email: string;
   role: "Manager" | "Team member";
   status: "Verified" | "Pending" | "Suspended" | "Archived";
+  staffStatus: StaffStatus;
   avatar: string;
   warehouseIds?: string[];
   archivedAt?: string | null;
@@ -55,6 +58,8 @@ type Administrator = {
   dateOfBirth?: string;
   location?: string;
 };
+
+type AdministratorsChangeHandler = (administrators: Administrator[]) => Promise<ActionResult<OperationsSnapshot>>;
 
 type Task = {
   id?: string;
@@ -484,6 +489,18 @@ function WarehouseStatusSummary({ statuses }: { statuses: WarehouseStatusSummary
   );
 }
 
+function identityInitials(name: string) {
+  const primaryName = name.split(",")[0]?.trim() ?? "";
+  const parts = primaryName.split(/\s+/).filter(Boolean);
+  if (!parts.length) return "U";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+function IdentityMark({ name, size = "medium" }: { name: string; size?: "small" | "medium" | "large" }) {
+  return <span className={`identity-mark identity-mark--${size}`} aria-hidden="true">{identityInitials(name)}</span>;
+}
+
 function LogoutIcon() {
   return <span className="logout-icon" aria-hidden="true">
     <img className="logout-icon__base" src="/assets/icon-logout-base.svg" alt="" />
@@ -652,7 +669,7 @@ function TaskTable({ tasks, onSelect }: { tasks: Task[]; onSelect?: (task: Task)
               <td>{task.invoice}</td>
               <td><TaskType type={task.type} /></td>
               <td>{task.warehouse}</td>
-              <td><span className="assignee"><img src={task.avatar} alt="" />{task.assignee}</span></td>
+              <td><span className="assignee"><IdentityMark name={task.assignee} size="small" />{task.assignee}</span></td>
               <td>{task.scheduled}</td>
               <td><span className={`status status--${statusClass(task.status)}`}>{task.status}</span></td>
             </tr>
@@ -933,6 +950,7 @@ function SettingsPage({
   canManageRoles,
   warehouses,
   auditEvents,
+  onSnapshot,
 }: {
   activeSection: SettingsSection;
   onSectionChange: (section: SettingsSection) => void;
@@ -942,11 +960,12 @@ function SettingsPage({
   notifications: NotificationSettings;
   onNotificationsChange: Dispatch<SetStateAction<NotificationSettings>>;
   administrators: Administrator[];
-  onAdministratorsChange: Dispatch<SetStateAction<Administrator[]>>;
+  onAdministratorsChange: AdministratorsChangeHandler;
   onFeedback: (message: string, tone?: "success" | "error") => void;
   canManageRoles: boolean;
   warehouses: Warehouse[];
   auditEvents: AuditEventDTO[];
+  onSnapshot?: (snapshot: OperationsSnapshot) => void;
 }) {
   const [accountDraft, setAccountDraft] = useState(account);
   const [passwords, setPasswords] = useState({ current: "", next: "", confirm: "" });
@@ -958,6 +977,8 @@ function SettingsPage({
   const [administratorMenuId, setAdministratorMenuId] = useState<string | null>(null);
   const [administratorMenuPosition, setAdministratorMenuPosition] = useState({ top: 0, left: 0 });
   const [administratorError, setAdministratorError] = useState("");
+  const [isAdministratorSubmitting, setIsAdministratorSubmitting] = useState(false);
+  const [isRoleChangesSaving, setIsRoleChangesSaving] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState("");
   const administrationModalRef = useRef<HTMLElement>(null);
   const administrationFirstInputRef = useRef<HTMLInputElement>(null);
@@ -997,35 +1018,94 @@ function SettingsPage({
     roleStatusFilter === "All status" || administrator.status === roleStatusFilter
   ));
 
-  function addAdministrator(event: FormEvent<HTMLFormElement>) {
+  async function addAdministrator(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const role = String(data.get("role") || "Manager") as Administrator["role"];
-    const email = String(data.get("email") || "").trim().toLowerCase();
+    const email = editingAdministrator?.authUserId
+      ? editingAdministrator.email.trim().toLowerCase()
+      : String(data.get("email") || "").trim().toLowerCase();
+    const name = String(data.get("name") || "").trim();
+    const location = String(data.get("location") || "").trim();
+    const warehouseIds = [...new Set(data.getAll("warehouseIds").map(String))];
     const duplicate = administratorDraft.some((administrator) => administrator.email.toLowerCase() === email && administrator.id !== editingAdministrator?.id);
     if (duplicate) {
       setAdministratorError("A team member with this email already exists.");
       return;
     }
+    if (name.length < 2) {
+      setAdministratorError("Enter the staff member's full name.");
+      return;
+    }
+    if (role === "Team member" && warehouseIds.length === 0) {
+      setAdministratorError("Choose at least one warehouse for a team member.");
+      return;
+    }
     const nextAdministrator: Administrator = {
-      id: editingAdministrator?.id ?? crypto.randomUUID(),
-      name: String(data.get("name") || "New team member").trim(),
+      id: editingAdministrator?.id ?? "",
+      authUserId: editingAdministrator?.authUserId ?? null,
+      name,
       email,
       role,
       status: editingAdministrator?.status ?? "Pending",
+      staffStatus: editingAdministrator?.staffStatus ?? "uninvited",
       avatar: editingAdministrator?.avatar ?? "/assets/avatar-james.png",
       gender: String(data.get("gender") || "Prefer not to say"),
       dateOfBirth: String(data.get("dateOfBirth") || ""),
-      location: String(data.get("location") || "Melbourne, Australia"),
-      warehouseIds: data.getAll("warehouseIds").map(String),
+      location,
+      warehouseIds,
     };
-    setAdministratorDraft((current) => editingAdministrator
-      ? current.map((administrator) => administrator.id === editingAdministrator.id ? nextAdministrator : administrator)
-      : [...current, nextAdministrator]);
-    setIsAdministrationModalOpen(false);
-    setEditingAdministrator(null);
+
+    if (editingAdministrator) {
+      setAdministratorDraft((current) => current.map((administrator) => administrator.id === editingAdministrator.id ? nextAdministrator : administrator));
+      setIsAdministrationModalOpen(false);
+      setEditingAdministrator(null);
+      setAdministratorError("");
+      onFeedback("Team member updated. Save role changes to confirm.");
+      return;
+    }
+
+    if (!onSnapshot) {
+      setAdministratorError("Member invitations are not available in this view.");
+      return;
+    }
+
+    setIsAdministratorSubmitting(true);
     setAdministratorError("");
-    onFeedback(editingAdministrator ? "Team member updated. Save role changes to confirm." : "Team member added. Save role changes to confirm.");
+    let result: Awaited<ReturnType<typeof createAndInviteStaffAction>>;
+    try {
+      result = await createAndInviteStaffAction({
+        fullName: nextAdministrator.name,
+        email: nextAdministrator.email,
+        role: nextAdministrator.role === "Manager" ? "manager" : "warehouse_team",
+        location: nextAdministrator.location,
+        warehouseIds: nextAdministrator.role === "Manager" ? [] : nextAdministrator.warehouseIds ?? [],
+        gender: nextAdministrator.gender ?? "Prefer not to say",
+        dateOfBirth: nextAdministrator.dateOfBirth ?? "",
+      });
+    } catch {
+      setIsAdministratorSubmitting(false);
+      setAdministratorError("The invitation could not be completed. Check your connection and try again.");
+      return;
+    }
+    setIsAdministratorSubmitting(false);
+
+    if (result.data) {
+      onSnapshot(result.data);
+      setAdministratorDraft(staffFromSnapshot(result.data));
+    }
+    if (!result.ok) {
+      if (result.profileCreated) {
+        closeAdministratorModal();
+        onFeedback(result.error, "error");
+      } else {
+        setAdministratorError(result.error);
+      }
+      return;
+    }
+
+    closeAdministratorModal();
+    onFeedback(`Invitation sent to ${nextAdministrator.email}.`);
   }
 
   function openAdministratorModal(administrator: Administrator | null = null) {
@@ -1047,8 +1127,27 @@ function SettingsPage({
       : action === "reset" ? await sendStaffPasswordResetAction(administrator.id)
         : await setStaffStateAction({ staffId: administrator.id, action });
     if (!result.ok) { onFeedback(result.error, "error"); return; }
-    onFeedback(action === "invite" ? `Invitation sent to ${administrator.email}.` : action === "reset" ? `Password reset sent to ${administrator.email}.` : `${administrator.name} updated.`);
-    window.location.reload();
+    onSnapshot?.(result.data);
+    setAdministratorDraft(staffFromSnapshot(result.data));
+    onFeedback(action === "invite" ? `Access email sent to ${administrator.email}.` : action === "reset" ? `Password reset sent to ${administrator.email}.` : `${administrator.name} updated.`);
+  }
+
+  async function saveAdministratorChanges() {
+    setIsRoleChangesSaving(true);
+    let result: Awaited<ReturnType<AdministratorsChangeHandler>>;
+    try {
+      result = await onAdministratorsChange(administratorDraft);
+    } catch {
+      result = { ok: false, error: "Role management changes could not be saved. Check your connection and try again." };
+    }
+    setIsRoleChangesSaving(false);
+    if (!result.ok) {
+      onFeedback(result.error, "error");
+      return;
+    }
+    onSnapshot?.(result.data);
+    setAdministratorDraft(staffFromSnapshot(result.data));
+    onFeedback("Role management changes saved.");
   }
 
   async function submitPassword(event: FormEvent<HTMLFormElement>) {
@@ -1136,7 +1235,7 @@ function SettingsPage({
                   </div>
                   {visibleAdministrators.map((administrator) => (
                     <div className="administrators-row" role="row" key={administrator.id}>
-                      <span className="administrator-name" role="cell"><img src={administrator.avatar} alt="" />{administrator.name}</span>
+                      <span className="administrator-name" role="cell"><IdentityMark name={administrator.name} size="small" />{administrator.name}</span>
                       <span role="cell">{administrator.email}</span>
                       <span role="cell">{administrator.role}</span>
                       <span className={`administrator-status administrator-status--${administrator.status.toLowerCase()}`} role="cell"><img src={administrator.status === "Verified" ? "/assets/icon-admin-verified.png" : "/assets/icon-admin-pending.png"} alt="" />{administrator.status}</span>
@@ -1170,8 +1269,8 @@ function SettingsPage({
                           <span className="administrator-actions" role="group" aria-label={`Actions for ${administrator.name}`} style={administratorMenuPosition}>
                             <button type="button" onClick={() => openAdministratorModal(administrator)}>Edit details and role</button>
                             <button type="button" onClick={() => openAdministratorModal(administrator)}>Manage warehouse access</button>
-                            {administrator.status === "Pending" ? <button type="button" onClick={() => void runStaffAction("invite", administrator)}>Resend invitation</button> : null}
-                            {administrator.status !== "Archived" ? <button type="button" onClick={() => void runStaffAction("reset", administrator)}>Send password-reset email</button> : null}
+                            {administrator.staffStatus === "uninvited" || administrator.staffStatus === "invited" ? <button type="button" onClick={() => void runStaffAction("invite", administrator)}>{administrator.staffStatus === "uninvited" ? "Send invitation" : "Resend access email"}</button> : null}
+                            {administrator.authUserId && (["invited", "active", "suspended"] as StaffStatus[]).includes(administrator.staffStatus) ? <button type="button" onClick={() => void runStaffAction("reset", administrator)}>Send password-reset email</button> : null}
                             {administrator.status === "Verified" ? <button type="button" onClick={() => void runStaffAction("suspend", administrator)}>Suspend</button> : null}
                             {administrator.status === "Suspended" ? <button type="button" onClick={() => void runStaffAction("reactivate", administrator)}>Reactivate</button> : null}
                             {administrator.status === "Archived" ? <button type="button" onClick={() => void runStaffAction("restore", administrator)}>Restore</button> : <button className="administrator-actions__danger" type="button" onClick={() => {
@@ -1187,8 +1286,8 @@ function SettingsPage({
               </div>
 
               <div className="settings-actions">
-                <button type="button" onClick={() => { setAdministratorDraft(administrators); setRoleStatusFilter("All status"); onFeedback("Unsaved role changes discarded."); }}>Cancel</button>
-                <button type="button" onClick={() => { onAdministratorsChange(administratorDraft); onFeedback("Role management changes saved."); }}>Save change</button>
+                <button type="button" disabled={isRoleChangesSaving} onClick={() => { setAdministratorDraft(administrators); setRoleStatusFilter("All status"); onFeedback("Unsaved role changes discarded."); }}>Cancel</button>
+                <button type="button" disabled={isRoleChangesSaving} onClick={() => void saveAdministratorChanges()}>{isRoleChangesSaving ? "Saving…" : "Save change"}</button>
               </div>
             </div>
           ) : null}
@@ -1288,13 +1387,25 @@ function SettingsPage({
               <h2 id="add-administration-title">{editingAdministrator ? "Edit Team Member" : "Add Team Member"}</h2>
               <button type="button" aria-label="Close" onClick={closeAdministratorModal}><img src="/assets/icon-admin-close.png" alt="" /></button>
             </header>
-            <div className="administration-avatar"><img src={editingAdministrator?.avatar ?? "/assets/admin-reference-avatar.jpeg"} alt={editingAdministrator?.name ?? "New team member"} /></div>
-            <form className="administration-form" onSubmit={addAdministrator}>
+            <div className="administration-avatar"><IdentityMark name={editingAdministrator?.name ?? "New team member"} size="large" /></div>
+            <form className="administration-form" onSubmit={addAdministrator} aria-busy={isAdministratorSubmitting}>
               <h3>Staff Information</h3>
               <div className="administration-fields">
                 <label><span>Staff Name</span><input ref={administrationFirstInputRef} name="name" defaultValue={editingAdministrator?.name} placeholder="Rumin Rafi" required /></label>
                 <label><span>Role</span><select name="role" defaultValue={editingAdministrator?.role ?? "Manager"}><option>Manager</option><option>Team member</option></select></label>
-                <label><span>E-mail Address</span><input name="email" type="email" defaultValue={editingAdministrator?.email} placeholder="youremail@gmail.com" required /></label>
+                <label>
+                  <span>E-mail Address</span>
+                  <input
+                    name="email"
+                    type="email"
+                    defaultValue={editingAdministrator?.email}
+                    placeholder="youremail@gmail.com"
+                    required
+                    disabled={Boolean(editingAdministrator?.authUserId)}
+                    aria-describedby={editingAdministrator?.authUserId ? "linked-email-help" : undefined}
+                  />
+                  {editingAdministrator?.authUserId ? <small className="administration-field-help" id="linked-email-help">Login email is locked after the account is linked.</small> : null}
+                </label>
                 <label><span>Gender</span><select name="gender" defaultValue={editingAdministrator?.gender ?? "Prefer not to say"}><option>Male</option><option>Female</option><option>Prefer not to say</option></select></label>
                 <label><span>Date of Birth</span><input name="dateOfBirth" type="date" defaultValue={editingAdministrator?.dateOfBirth} /></label>
                 <label><span>Location</span><select name="location" defaultValue={editingAdministrator?.location ?? "Melbourne, Australia"}><option>Melbourne, Australia</option><option>Sunshine, Australia</option><option>Geelong, Australia</option></select></label>
@@ -1302,8 +1413,8 @@ function SettingsPage({
               </div>
               {administratorError ? <p className="settings-message settings-message--error" role="alert">{administratorError}</p> : null}
               <div className="administration-form__actions">
-                <button type="button" onClick={closeAdministratorModal}>Cancel</button>
-                <button type="submit">{editingAdministrator ? "Save changes" : "Add member"}</button>
+                <button type="button" onClick={closeAdministratorModal} disabled={isAdministratorSubmitting}>Cancel</button>
+                <button type="submit" disabled={isAdministratorSubmitting}>{isAdministratorSubmitting ? "Sending invitation…" : editingAdministrator ? "Save changes" : "Add member"}</button>
               </div>
             </form>
           </section>
@@ -1331,6 +1442,7 @@ function Dashboard({
   onRestoreTask,
   onSaveWarehouse,
   onSetWarehouseArchived,
+  onSnapshot,
 }: {
   onSignOut: () => void;
   tasks: Task[];
@@ -1341,7 +1453,7 @@ function Dashboard({
   notifications: NotificationSettings;
   onNotificationsChange: Dispatch<SetStateAction<NotificationSettings>>;
   administrators: Administrator[];
-  onAdministratorsChange: Dispatch<SetStateAction<Administrator[]>>;
+  onAdministratorsChange: AdministratorsChangeHandler;
   notices: AppNotice[];
   onNoticesChange: Dispatch<SetStateAction<AppNotice[]>>;
   warehouses: Warehouse[];
@@ -1349,6 +1461,7 @@ function Dashboard({
   onRestoreTask: (taskId: string) => void;
   onSaveWarehouse: (warehouse: { id?: string; officeType: string; name: string; address: string }) => Promise<string | null>;
   onSetWarehouseArchived: (warehouseId: string, restore: boolean) => Promise<string | null>;
+  onSnapshot: (snapshot: OperationsSnapshot) => void;
 }) {
   const [activeNav, setActiveNav] = useState("Dashboard");
   const [activeSettings, setActiveSettings] = useState<SettingsSection | null>(null);
@@ -1547,8 +1660,8 @@ function Dashboard({
               aria-expanded={isProfileMenuOpen}
               onClick={() => setIsProfileMenuOpen((open) => !open)}
             >
-              <img src={account.avatar} alt={account.name} />
-              <span><strong>{account.name}</strong><small>{account.email}</small></span>
+              <IdentityMark name={account.name} />
+              <span className="profile-button__copy"><strong>{account.name}</strong><small>{account.email}</small></span>
               <span className="chevron"><LayeredIcon kind="dropdown" /></span>
             </button>
 
@@ -1603,6 +1716,7 @@ function Dashboard({
           canManageRoles
           warehouses={warehouses}
           auditEvents={auditEvents}
+          onSnapshot={onSnapshot}
         />
       ) : activeNav === "Warehouses" ? (
         <>
@@ -1843,7 +1957,7 @@ function WarehouseTeamDashboard({
   notifications: NotificationSettings;
   onNotificationsChange: Dispatch<SetStateAction<NotificationSettings>>;
   administrators: Administrator[];
-  onAdministratorsChange: Dispatch<SetStateAction<Administrator[]>>;
+  onAdministratorsChange: AdministratorsChangeHandler;
   notices: AppNotice[];
   onNoticesChange: Dispatch<SetStateAction<AppNotice[]>>;
   warehouses: Warehouse[];
@@ -1978,8 +2092,8 @@ function WarehouseTeamDashboard({
               aria-expanded={isProfileMenuOpen}
               onClick={() => setIsProfileMenuOpen((open) => !open)}
             >
-              <img src={account.avatar} alt={account.name} />
-              <span><strong>{account.name}</strong><small>{account.email}</small></span>
+              <IdentityMark name={account.name} />
+              <span className="profile-button__copy"><strong>{account.name}</strong><small>{account.email}</small></span>
               <span className="chevron"><LayeredIcon kind="dropdown" /></span>
             </button>
             {isProfileMenuOpen ? (
@@ -2222,7 +2336,7 @@ function taskFromDto(task: TaskDTO): Task {
     assignee: names.join(", ") || "Unassigned",
     assignees: names,
     assigneeIds: task.assignees.map((assignee) => assignee.id),
-    avatar: task.assignees[0]?.avatarUrl || "/assets/avatar-james.png",
+    avatar: "",
     date,
     scheduled: `${formatTaskDate(date)} · ${melbourneTaskTime(task.scheduledAt)}`,
     scheduledAt: task.scheduledAt,
@@ -2266,17 +2380,21 @@ function teamTaskFromDto(task: TaskDTO): TeamTask {
 }
 
 function accountFromSnapshot(snapshot: OperationsSnapshot): Account {
-  return { id: snapshot.account.id, name: snapshot.account.fullName, email: snapshot.account.email, location: snapshot.account.location, avatar: snapshot.account.avatarUrl, warehouseIds: snapshot.account.warehouseIds };
+  return { id: snapshot.account.id, name: snapshot.account.fullName, email: snapshot.account.email, location: snapshot.account.location, avatar: "", warehouseIds: snapshot.account.warehouseIds };
 }
 
 function staffFromSnapshot(snapshot: OperationsSnapshot): Administrator[] {
   return snapshot.staff.map((staff) => ({
     id: staff.id,
+    authUserId: staff.authUserId,
     name: staff.fullName,
     email: staff.email,
     role: staff.role === "manager" ? "Manager" : "Team member",
     status: staff.status === "active" ? "Verified" : staff.status === "suspended" ? "Suspended" : staff.status === "archived" ? "Archived" : "Pending",
-    avatar: staff.avatarUrl,
+    staffStatus: staff.status,
+    avatar: "",
+    gender: staff.gender,
+    dateOfBirth: staff.dateOfBirth ?? "",
     location: staff.location,
     warehouseIds: staff.warehouseIds,
     archivedAt: staff.archivedAt,
@@ -2406,34 +2524,49 @@ export default function Home() {
     void updateProfileAction({ fullName: next.name, location: next.location }).then((result) => handleResult(result, () => setAccountState(previous)));
   };
 
-  const onAdministratorsChange: Dispatch<SetStateAction<Administrator[]>> = (updater) => {
+  const onAdministratorsChange: AdministratorsChangeHandler = async (next) => {
     const previous = administrators;
-    const next = typeof updater === "function" ? updater(previous) : updater;
-    setAdministratorsState(next);
-    void (async () => {
-      for (const member of next) {
-        const old = previous.find((item) => item.id === member.id);
-        if (!old || JSON.stringify(old) !== JSON.stringify(member)) {
-          const result = await saveStaffAction({ id: old ? member.id : undefined, fullName: member.name, email: member.email, role: member.role === "Manager" ? "manager" : "warehouse_team", location: member.location ?? "Melbourne, Australia", warehouseIds: member.role === "Manager" ? [] : member.warehouseIds ?? [] });
-          if (!result.ok) { setAdministratorsState(previous); setBackendMessage(result.error); return; }
-          if (!old) {
-            const created = result.data.staff.find((staff) => staff.email.toLowerCase() === member.email.toLowerCase());
-            if (created) {
-              const invitation = await inviteStaffAction(created.id);
-              if (!invitation.ok) { applySnapshot(result.data); setBackendMessage(invitation.error); return; }
-              applySnapshot(invitation.data);
-              continue;
-            }
-          }
+    let finalSnapshot = snapshot;
+    if (!finalSnapshot) return { ok: false, error: "Operations data is not ready yet.", code: "DATA_NOT_READY" };
+    for (const member of next) {
+      const old = previous.find((item) => item.id === member.id);
+      if (old && JSON.stringify(old) === JSON.stringify(member)) continue;
+
+      const payload = {
+        fullName: member.name,
+        email: member.email,
+        role: member.role === "Manager" ? "manager" as const : "warehouse_team" as const,
+        location: member.location ?? "Melbourne, Australia",
+        warehouseIds: member.role === "Manager" ? [] : member.warehouseIds ?? [],
+        gender: member.gender === "Male" || member.gender === "Female" ? member.gender : "Prefer not to say" as const,
+        dateOfBirth: member.dateOfBirth ?? "",
+      };
+
+      if (!old) {
+        const result = await createAndInviteStaffAction(payload);
+        if (result.data) {
+          finalSnapshot = result.data;
           applySnapshot(result.data);
         }
+        if (!result.ok) return { ok: false, error: result.error, code: result.code };
+        continue;
       }
-      for (const member of previous.filter((item) => !next.some((candidate) => candidate.id === item.id))) {
-        const result = await setStaffStateAction({ staffId: member.id, action: "archive" });
-        if (!result.ok) { setAdministratorsState(previous); setBackendMessage(result.error); return; }
-        applySnapshot(result.data);
-      }
-    })();
+
+      const result = await saveStaffAction({ id: member.id, ...payload });
+      if (!result.ok) return result;
+      finalSnapshot = result.data;
+      applySnapshot(result.data);
+    }
+
+    for (const member of previous.filter((item) => !next.some((candidate) => candidate.id === item.id))) {
+      const result = await setStaffStateAction({ staffId: member.id, action: "archive" });
+      if (!result.ok) return result;
+      finalSnapshot = result.data;
+      applySnapshot(result.data);
+    }
+
+    setBackendMessage("");
+    return { ok: true, data: finalSnapshot };
   };
 
   const onNotificationsChange: Dispatch<SetStateAction<NotificationSettings>> = (updater) => {
@@ -2494,7 +2627,7 @@ export default function Home() {
 
   return <>
     {snapshot.account.role === "manager"
-      ? <Dashboard {...sharedProps} tasks={managerTasks} onTasksChange={onTasksChange} onTeamTasksChange={() => undefined} onRestoreTask={onRestoreTask} onSaveWarehouse={onSaveWarehouse} onSetWarehouseArchived={onSetWarehouseArchived} />
+      ? <Dashboard {...sharedProps} tasks={managerTasks} onTasksChange={onTasksChange} onTeamTasksChange={() => undefined} onRestoreTask={onRestoreTask} onSaveWarehouse={onSaveWarehouse} onSetWarehouseArchived={onSetWarehouseArchived} onSnapshot={applySnapshot} />
       : <WarehouseTeamDashboard {...sharedProps} tasks={teamTasks} onTasksChange={onTeamTasksChange} />}
     {backendMessage ? <FeedbackToast tone="error" message={backendMessage} onDismiss={() => setBackendMessage("")} /> : null}
   </>;
