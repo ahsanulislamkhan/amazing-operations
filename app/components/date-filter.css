@@ -1,0 +1,438 @@
+.date-filter {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ink, #020618);
+}
+
+.date-filter__trigger {
+  min-width: 250px;
+  min-height: 84px;
+  padding: 0 4px 0 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.date-filter__trigger:hover,
+.date-filter__trigger[aria-expanded="true"] {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.date-filter__trigger:focus-visible {
+  outline: 3px solid #007fb8;
+  outline-offset: 3px;
+}
+
+.date-filter__number {
+  width: 84px;
+  height: 84px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.28);
+  display: grid;
+  place-items: center;
+  flex: 0 0 84px;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.48px;
+}
+
+.date-filter__number--all {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.date-filter__copy {
+  min-width: 0;
+  width: 112px;
+  display: flex;
+  flex-direction: column;
+  font-size: 18px;
+  line-height: 22px;
+  letter-spacing: -0.18px;
+  white-space: nowrap;
+}
+
+.date-filter__weekday,
+.date-filter__month-year {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.date-filter__all-label {
+  width: fit-content;
+  margin-top: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eaf8fe;
+  color: #008fd0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+  letter-spacing: 0;
+}
+
+.date-filter__trigger-chevron {
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  flex: 0 0 24px;
+  color: var(--muted, #62748e);
+  display: grid;
+  place-items: center;
+  transition: transform 160ms ease;
+}
+
+.date-filter__trigger-chevron img {
+  width: 13px;
+  height: 7px;
+}
+
+.date-filter__trigger-chevron--open {
+  transform: rotate(180deg);
+}
+
+.date-filter__popover {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 12px);
+  right: 0;
+  width: min(368px, calc(100vw - 24px));
+  max-height: min(590px, calc(100vh - 32px));
+  max-height: min(590px, calc(100dvh - 32px));
+  padding: 22px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 28px;
+  background: #fff;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 24px 70px rgba(2, 6, 24, 0.16), 0 4px 16px rgba(2, 6, 24, 0.06);
+}
+
+.date-filter__popover-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.date-filter__popover-heading > div {
+  min-width: 0;
+}
+
+.date-filter__eyebrow {
+  color: var(--brand, #00aef3);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.date-filter__popover-heading h2 {
+  margin: 3px 0 0;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 28px;
+  letter-spacing: -0.35px;
+}
+
+.date-filter__selection-summary {
+  max-width: 146px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--muted, #62748e);
+  font-size: 11px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.date-filter__month-navigation {
+  min-height: 48px;
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-filter__month-navigation strong {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.date-filter__icon-button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--muted, #62748e);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.date-filter__icon-button img {
+  width: 20px;
+  height: 20px;
+}
+
+.date-filter__arrow--left {
+  transform: rotate(180deg);
+}
+
+.date-filter__icon-button:hover:not(:disabled) {
+  border-color: var(--brand, #00aef3);
+  color: var(--brand, #00aef3);
+}
+
+.date-filter__icon-button:focus-visible,
+.date-filter__day:focus-visible,
+.date-filter__action:focus-visible {
+  outline: 3px solid #007fb8;
+  outline-offset: 2px;
+}
+
+.date-filter__icon-button:disabled,
+.date-filter__action:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.date-filter__calendar {
+  margin-top: 12px;
+}
+
+.date-filter__weekdays,
+.date-filter__week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.date-filter__days {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.date-filter__weekdays span {
+  min-width: 0;
+  padding: 5px 0 9px;
+  color: var(--muted, #62748e);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.date-filter__week > span,
+.date-filter__empty-day {
+  min-width: 0;
+  min-height: 40px;
+  display: grid;
+  place-items: center;
+}
+
+.date-filter__day {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink, #020618);
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.date-filter__day:hover:not(:disabled) {
+  background: #eaf8fe;
+  color: #008fd0;
+}
+
+.date-filter__day--today:not(.date-filter__day--selected)::after {
+  position: absolute;
+  right: 7px;
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--brand, #00aef3);
+  content: "";
+}
+
+.date-filter__day--selected,
+.date-filter__day--selected:hover:not(:disabled) {
+  background: var(--brand, #00aef3);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 6px 16px rgba(0, 174, 243, 0.24);
+}
+
+.date-filter__day:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+.date-filter__actions {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #eef2f7;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.date-filter__range-fields { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.date-filter__range-fields label { display: grid; gap: 7px; color: var(--muted, #62748e); font-size: 13px; font-weight: 600; }
+.date-filter__range-fields input { width: 100%; min-width: 0; height: 48px; padding: 0 12px; border: 1px solid var(--line, #dbe4ee); border-radius: 14px; background: #fff; color: var(--ink, #020618); font: inherit; }
+.date-filter__range-fields input:focus-visible { outline: 3px solid #007fb8; outline-offset: 2px; }
+.date-filter__quick-actions { margin-top: 14px; display: flex; gap: 8px; }
+.date-filter__quick-actions button { min-height: 40px; padding: 0 16px; border: 1px solid #dbe4ee; border-radius: 999px; background: #f8fafc; color: #526782; cursor: pointer; }
+.date-filter__quick-actions button:hover { border-color: var(--brand, #00aef3); color: #008fd0; }
+.date-filter__error { margin: 12px 0 0; color: #ff2d37; font-size: 13px; line-height: 18px; }
+
+@media (max-width: 430px) { .date-filter__range-fields { grid-template-columns: 1fr; } }
+
+.date-filter__action {
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.date-filter__action--secondary {
+  border: 1px solid #cad5e2;
+  background: #fff;
+  color: var(--muted, #62748e);
+}
+
+.date-filter__action--secondary:hover {
+  border-color: var(--brand, #00aef3);
+  color: #008fd0;
+}
+
+.date-filter__action--primary {
+  border: 1px solid var(--brand, #00aef3);
+  background: var(--brand, #00aef3);
+  color: #fff;
+  box-shadow: 0 7px 18px rgba(0, 174, 243, 0.18);
+}
+
+.date-filter__action--primary:hover:not(:disabled) {
+  border-color: #009fdf;
+  background: #009fdf;
+}
+
+@media (max-width: 700px) {
+  .date-filter__trigger {
+    min-width: 0;
+    min-height: 68px;
+    padding-right: 2px;
+  }
+
+  .date-filter__number {
+    width: 68px;
+    height: 68px;
+    flex-basis: 68px;
+    font-size: 21px;
+  }
+
+  .date-filter__copy {
+    width: 104px;
+    font-size: 16px;
+    line-height: 19px;
+  }
+
+  .date-filter__trigger-chevron {
+    width: 21px;
+    height: 21px;
+    flex-basis: 21px;
+  }
+
+  .date-filter__popover {
+    position: fixed;
+    top: 50%;
+    right: max(12px, env(safe-area-inset-right));
+    left: max(12px, env(safe-area-inset-left));
+    width: auto;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    transform: translateY(-50%);
+  }
+}
+
+@media (min-width: 701px) and (max-width: 960px) {
+  .date-filter__popover {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .date-filter__popover {
+    padding: 14px;
+    border-radius: 24px;
+  }
+
+  .date-filter__selection-summary {
+    display: none;
+  }
+
+  .date-filter__weekdays,
+  .date-filter__week {
+    gap: 1px;
+  }
+
+  .date-filter__days {
+    gap: 1px;
+  }
+
+  .date-filter__day {
+    width: 100%;
+    max-width: 38px;
+    height: auto;
+    aspect-ratio: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .date-filter__trigger,
+  .date-filter__trigger-chevron {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .date-filter__day--selected {
+    outline: 2px solid CanvasText;
+  }
+
+  .date-filter__all-label {
+    border: 1px solid CanvasText;
+  }
+}
