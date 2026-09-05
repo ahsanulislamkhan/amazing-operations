@@ -3,6 +3,7 @@
 import { Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DateFilter from "./components/DateFilter";
+import MultiAssigneeSelect from "./components/MultiAssigneeSelect";
 import type { ActionResult, AuditEventDTO, DateRange, NotificationPreferencesDTO, OperationsSnapshot, StaffStatus, TaskDTO } from "@/lib/operations/types";
 import { canTeamTransition } from "@/lib/operations/types";
 import { changePasswordAction, signInAction, signOutAction } from "./actions/auth";
@@ -139,7 +140,17 @@ type Warehouse = {
   statuses: WarehouseStatusSummaryItem[];
 };
 
-const OPERATIONAL_REFERENCE_DATE = "2026-08-19";
+function todayInMelbourne() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Australia/Melbourne",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
 function isOperationalDate(value: string | null | undefined): value is string {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const [year, month, day] = value.split("-").map(Number);
@@ -1472,6 +1483,7 @@ function Dashboard({
   const [warehouseFilter, setWarehouseFilter] = useState("All warehouse");
   const [statusFilter, setStatusFilter] = useState("All status");
   const [newTaskWarehouseId, setNewTaskWarehouseId] = useState(warehouses.find((warehouse) => !warehouse.archivedAt)?.id ?? "");
+  const [newTaskAssigneeIds, setNewTaskAssigneeIds] = useState<string[]>([]);
   const [warehouseListFilter, setWarehouseListFilter] = useState<"Active" | "Archived">("Active");
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null | undefined>(undefined);
   const [warehouseError, setWarehouseError] = useState("");
@@ -1545,7 +1557,7 @@ function Dashboard({
       setFeedback(`${invoice} already exists. Use a unique invoice number.`);
       return;
     }
-    const date = String(data.get("scheduled") || OPERATIONAL_REFERENCE_DATE);
+    const date = String(data.get("scheduled") || todayInMelbourne());
     const quantity = String(data.get("quantity") || "1").trim();
     if (!/^\d+(?:\s+\w+)?$/i.test(quantity)) {
       setFeedbackTone("error");
@@ -1588,6 +1600,7 @@ function Dashboard({
     onNoticesChange((current) => [{ id: crypto.randomUUID(), title: "Task created", message: `${invoice} was assigned to ${assignee}.`, time: "Just now", read: false }, ...current]);
     setFeedbackTone("success");
     setFeedback(`${invoice} created successfully.`);
+    setNewTaskAssigneeIds([]);
     setIsTaskPanelOpen(false);
     setActiveNav("Tasks");
   }
@@ -1695,7 +1708,7 @@ function Dashboard({
         </div>
         {!activeSettings ? <div className="overview-actions">
           <DateFilter value={dateRange} onChange={setDateRange} />
-          {activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => setIsTaskPanelOpen(true)}>
+          {activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => { setNewTaskAssigneeIds([]); setIsTaskPanelOpen(true); }}>
             <img src="/assets/icon-add.svg" alt="" /> Add new task
           </button> : null}
         </div> : null}
@@ -1842,7 +1855,7 @@ function Dashboard({
               <label className="form-field">
                 <span>Schedule date</span>
                 <span className="input-with-icon">
-                  <input name="scheduled" type="date" defaultValue={activeDate ?? dateRange.from ?? OPERATIONAL_REFERENCE_DATE} required />
+                  <input name="scheduled" type="date" defaultValue={activeDate ?? dateRange.from ?? todayInMelbourne()} required />
                   <img src="/assets/icon-calendar.svg" alt="" />
                 </span>
               </label>
@@ -1866,17 +1879,19 @@ function Dashboard({
               <div className="task-form__row">
                 <label className="form-field">
                   <span>Warehouse</span>
-                  <select name="warehouseId" value={newTaskWarehouseId} onChange={(event) => setNewTaskWarehouseId(event.target.value)} required>
+                  <select name="warehouseId" value={newTaskWarehouseId} onChange={(event) => { setNewTaskWarehouseId(event.target.value); setNewTaskAssigneeIds([]); }} required>
                     <option value="" disabled>Select warehouse</option>
                     {warehouses.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => <option value={warehouse.id} key={warehouse.id}>{warehouse.name}</option>)}
                   </select>
                 </label>
-                <label className="form-field">
+                <div className="form-field">
                   <span>Assigned to (select one or more)</span>
-                  <select name="assigneeIds" multiple required aria-label="Eligible task assignees">
-                    {administrators.filter((member) => member.role === "Team member" && member.status === "Verified" && member.warehouseIds?.includes(newTaskWarehouseId)).map((member) => <option value={member.id} key={member.id}>{member.name}</option>)}
-                  </select>
-                </label>
+                  <MultiAssigneeSelect
+                    options={administrators.filter((member) => member.role === "Team member" && member.status === "Verified" && member.warehouseIds?.includes(newTaskWarehouseId)).map((member) => ({ id: member.id, name: member.name }))}
+                    selectedIds={newTaskAssigneeIds}
+                    onChange={setNewTaskAssigneeIds}
+                  />
+                </div>
               </div>
 
               <label className="form-field">

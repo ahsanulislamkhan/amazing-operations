@@ -291,6 +291,11 @@
   box-shadow: 0 6px 16px rgba(0, 174, 243, 0.24);
 }
 
+.date-filter__day--in-range:not(.date-filter__day--selected) {
+  background: #eaf8fe;
+  color: #008fd0;
+}
+
 .date-filter__day:disabled {
   color: #cbd5e1;
   cursor: not-allowed;
@@ -305,16 +310,21 @@
   gap: 10px;
 }
 
-.date-filter__range-fields { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.date-filter__range-fields label { display: grid; gap: 7px; color: var(--muted, #62748e); font-size: 13px; font-weight: 600; }
-.date-filter__range-fields input { width: 100%; min-width: 0; height: 48px; padding: 0 12px; border: 1px solid var(--line, #dbe4ee); border-radius: 14px; background: #fff; color: var(--ink, #020618); font: inherit; }
-.date-filter__range-fields input:focus-visible { outline: 3px solid #007fb8; outline-offset: 2px; }
+.date-filter__range-fields { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.date-filter__range-field { min-width: 0; min-height: 58px; padding: 9px 12px; border: 1px solid var(--line, #dbe4ee); border-radius: 16px; background: #fff; color: var(--ink, #020618); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; text-align: left; cursor: pointer; }
+.date-filter__range-field > span { color: var(--muted, #62748e); font-size: 11px; font-weight: 600; line-height: 15px; }
+.date-filter__range-field > strong { max-width: 100%; overflow: hidden; font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.date-filter__range-field--active { border-color: var(--brand, #00aef3); box-shadow: 0 0 0 3px rgba(0, 174, 243, .11); }
+.date-filter__range-field:focus-visible { outline: 3px solid #007fb8; outline-offset: 2px; }
 .date-filter__quick-actions { margin-top: 14px; display: flex; gap: 8px; }
 .date-filter__quick-actions button { min-height: 40px; padding: 0 16px; border: 1px solid #dbe4ee; border-radius: 999px; background: #f8fafc; color: #526782; cursor: pointer; }
 .date-filter__quick-actions button:hover { border-color: var(--brand, #00aef3); color: #008fd0; }
 .date-filter__error { margin: 12px 0 0; color: #ff2d37; font-size: 13px; line-height: 18px; }
 
-@media (max-width: 430px) { .date-filter__range-fields { grid-template-columns: 1fr; } }
+@media (max-width: 430px) {
+  .date-filter__range-fields { grid-template-columns: 1fr; }
+  .date-filter__range-field { min-height: 52px; }
+}
 
 .date-filter__action {
   min-height: 48px;
