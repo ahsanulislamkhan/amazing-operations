@@ -42,3 +42,14 @@ test("identity is rendered without photographic profile images", async () => {
   assert.doesNotMatch(source, /<img\s+src=\{(?:account|task|administrator)[^}]*\.avatar/);
   assert.doesNotMatch(source, /admin-reference-avatar/);
 });
+
+test("the date picker exposes a visible confirmation action and every warehouse status has an icon", async () => {
+  const [page, dateFilter] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/DateFilter.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dateFilter, /date-filter__actions/);
+  assert.match(dateFilter, />Done<\/button>/);
+  assert.match(page, /progress:\s*"\/assets\/icon-clock\.svg"/);
+});

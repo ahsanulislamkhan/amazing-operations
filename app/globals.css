@@ -329,6 +329,7 @@ th:nth-child(6), td:nth-child(6) { width: 6.5%; }
 .warehouse-status--red { border-color: #ffe2e2; background: #fef2f2; }
 .warehouse-status--blue .warehouse-status__label { color: #4189ff; }
 .warehouse-status--purple .warehouse-status__label { color: #7c3aed; }
+.warehouse-status--purple .single-icon { filter: brightness(0) saturate(100%) invert(31%) sepia(98%) saturate(2929%) hue-rotate(252deg) brightness(86%) contrast(96%); }
 .warehouse-status--green .warehouse-status__label { color: #087443; }
 .warehouse-status--red .warehouse-status__label { color: #d91e2a; }
 .warehouse-card--interactive { cursor: pointer; transition: transform .18s ease, box-shadow .18s ease; }

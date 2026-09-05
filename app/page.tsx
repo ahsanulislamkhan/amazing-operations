@@ -450,6 +450,7 @@ function LayeredIcon({ kind }: { kind: string }) {
     dashboard: "/assets/icon-dashboard.svg",
     tasks: "/assets/icon-tasks.svg",
     clock: "/assets/icon-stat-clock.svg",
+    progress: "/assets/icon-clock.svg",
     danger: "/assets/icon-stat-danger.svg",
     box: "/assets/icon-stat-box.svg",
   };

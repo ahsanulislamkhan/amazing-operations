@@ -113,9 +113,17 @@
   border: 1px solid rgba(226, 232, 240, 0.9);
   border-radius: 28px;
   background: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(2, 6, 24, 0.16), 0 4px 16px rgba(2, 6, 24, 0.06);
+}
+
+.date-filter__body {
+  min-height: 0;
+  padding-right: 2px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  box-shadow: 0 24px 70px rgba(2, 6, 24, 0.16), 0 4px 16px rgba(2, 6, 24, 0.06);
 }
 
 .date-filter__popover-heading {
@@ -302,9 +310,11 @@
 }
 
 .date-filter__actions {
+  flex: 0 0 auto;
   margin-top: 18px;
   padding-top: 16px;
   border-top: 1px solid #eef2f7;
+  background: #fff;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;

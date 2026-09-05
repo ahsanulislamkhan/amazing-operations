@@ -191,34 +191,36 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
       </button>
       {open ? (
         <section className="date-filter__popover" style={popoverStyle} role="dialog" aria-modal="false" aria-labelledby={titleId}>
-          <div className="date-filter__popover-heading">
-            <div><span className="date-filter__eyebrow">Schedule</span><h2 id={titleId}>Date range</h2></div>
-            <span className="date-filter__selection-summary">Inclusive</span>
-          </div>
-          <div className="date-filter__range-fields">
-            <button className={activeEndpoint === "from" ? "date-filter__range-field date-filter__range-field--active" : "date-filter__range-field"} type="button" onClick={() => { setActiveEndpoint("from"); setError(""); }}>
-              <span>Start date</span><strong>{displayDate(draft.from)}</strong>
-            </button>
-            <button className={activeEndpoint === "to" ? "date-filter__range-field date-filter__range-field--active" : "date-filter__range-field"} type="button" onClick={() => { setActiveEndpoint("to"); setError(""); }}>
-              <span>End date</span><strong>{displayDate(draft.to)}</strong>
-            </button>
-          </div>
-          <div className="date-filter__month-navigation">
-            <button className="date-filter__icon-button" type="button" aria-label="Previous month" onClick={() => setVisibleMonth((current) => shiftMonth(current, -1))}><img className="date-filter__arrow--left" src="/assets/icon-arrow-right.svg" alt="" /></button>
-            <strong>{visibleMonthLabel}</strong>
-            <button className="date-filter__icon-button" type="button" aria-label="Next month" onClick={() => setVisibleMonth((current) => shiftMonth(current, 1))}><img src="/assets/icon-arrow-right.svg" alt="" /></button>
-          </div>
-          <div className="date-filter__calendar" role="grid" aria-label={`${visibleMonthLabel} calendar`}>
-            <div className="date-filter__weekdays" role="row">{WEEKDAYS.map((weekday) => <span role="columnheader" key={weekday}>{weekday}</span>)}</div>
-            <div className="date-filter__days">
-              {weeks.map((week, index) => <div className="date-filter__week" role="row" key={index}>{week.map((day) => day.inMonth ? (
-                <span role="gridcell" key={day.iso}><button className={`date-filter__day${day.iso === today ? " date-filter__day--today" : ""}${day.iso === draft.from || day.iso === draft.to ? " date-filter__day--selected" : ""}${draft.from && draft.to && day.iso > draft.from && day.iso < draft.to ? " date-filter__day--in-range" : ""}`} type="button" aria-label={new Intl.DateTimeFormat("en-AU", { dateStyle: "full", timeZone: "UTC" }).format(day.date)} aria-pressed={day.iso === draft.from || day.iso === draft.to} onClick={() => selectDate(day.iso)}>{day.date.getUTCDate()}</button></span>
-              ) : <span className="date-filter__empty-day" role="gridcell" aria-hidden="true" key={day.iso} />)}</div>)}
+          <div className="date-filter__body">
+            <div className="date-filter__popover-heading">
+              <div><span className="date-filter__eyebrow">Schedule</span><h2 id={titleId}>Date range</h2></div>
+              <span className="date-filter__selection-summary">Inclusive</span>
             </div>
+            <div className="date-filter__range-fields">
+              <button className={activeEndpoint === "from" ? "date-filter__range-field date-filter__range-field--active" : "date-filter__range-field"} type="button" onClick={() => { setActiveEndpoint("from"); setError(""); }}>
+                <span>Start date</span><strong>{displayDate(draft.from)}</strong>
+              </button>
+              <button className={activeEndpoint === "to" ? "date-filter__range-field date-filter__range-field--active" : "date-filter__range-field"} type="button" onClick={() => { setActiveEndpoint("to"); setError(""); }}>
+                <span>End date</span><strong>{displayDate(draft.to)}</strong>
+              </button>
+            </div>
+            <div className="date-filter__month-navigation">
+              <button className="date-filter__icon-button" type="button" aria-label="Previous month" onClick={() => setVisibleMonth((current) => shiftMonth(current, -1))}><img className="date-filter__arrow--left" src="/assets/icon-arrow-right.svg" alt="" /></button>
+              <strong>{visibleMonthLabel}</strong>
+              <button className="date-filter__icon-button" type="button" aria-label="Next month" onClick={() => setVisibleMonth((current) => shiftMonth(current, 1))}><img src="/assets/icon-arrow-right.svg" alt="" /></button>
+            </div>
+            <div className="date-filter__calendar" role="grid" aria-label={`${visibleMonthLabel} calendar`}>
+              <div className="date-filter__weekdays" role="row">{WEEKDAYS.map((weekday) => <span role="columnheader" key={weekday}>{weekday}</span>)}</div>
+              <div className="date-filter__days">
+                {weeks.map((week, index) => <div className="date-filter__week" role="row" key={index}>{week.map((day) => day.inMonth ? (
+                  <span role="gridcell" key={day.iso}><button className={`date-filter__day${day.iso === today ? " date-filter__day--today" : ""}${day.iso === draft.from || day.iso === draft.to ? " date-filter__day--selected" : ""}${draft.from && draft.to && day.iso > draft.from && day.iso < draft.to ? " date-filter__day--in-range" : ""}`} type="button" aria-label={new Intl.DateTimeFormat("en-AU", { dateStyle: "full", timeZone: "UTC" }).format(day.date)} aria-pressed={day.iso === draft.from || day.iso === draft.to} onClick={() => selectDate(day.iso)}>{day.date.getUTCDate()}</button></span>
+                ) : <span className="date-filter__empty-day" role="gridcell" aria-hidden="true" key={day.iso} />)}</div>)}
+              </div>
+            </div>
+            {error ? <p className="date-filter__error" role="alert">{error}</p> : null}
+            <div className="date-filter__quick-actions"><button type="button" onClick={chooseToday}>Today</button><button type="button" onClick={chooseAll}>All Dates</button></div>
           </div>
-          {error ? <p className="date-filter__error" role="alert">{error}</p> : null}
-          <div className="date-filter__quick-actions"><button type="button" onClick={chooseToday}>Today</button><button type="button" onClick={chooseAll}>All Dates</button></div>
-          <div className="date-filter__actions"><button className="date-filter__action date-filter__action--secondary" type="button" onClick={() => { setDraft(value); setError(""); setOpen(false); triggerRef.current?.focus(); }}>Cancel</button><button className="date-filter__action date-filter__action--primary" type="button" onClick={apply}>Apply range</button></div>
+          <div className="date-filter__actions"><button className="date-filter__action date-filter__action--secondary" type="button" onClick={() => { setDraft(value); setError(""); setOpen(false); triggerRef.current?.focus(); }}>Cancel</button><button className="date-filter__action date-filter__action--primary" type="button" onClick={apply}>Done</button></div>
         </section>
       ) : null}
     </div>
