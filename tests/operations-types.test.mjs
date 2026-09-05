@@ -45,6 +45,16 @@ test("identity is rendered without photographic profile images", async () => {
   assert.doesNotMatch(source, /admin-reference-avatar/);
 });
 
+test("warehouse team status changes require confirmation", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /function StatusChangeConfirmation/);
+  assert.match(source, /role="alertdialog"/);
+  assert.match(source, /requestTaskStatusChange\(task, status\)/);
+  assert.match(source, /Yes, change status/);
+  assert.match(source, /updateTaskStatus\(pendingStatusChange\.invoice, pendingStatusChange\.toStatus\)/);
+});
+
 test("the date picker exposes a visible confirmation action and every warehouse status has an icon", async () => {
   const [page, dateFilter] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

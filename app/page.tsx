@@ -644,6 +644,64 @@ function WarehouseDetailsModal({
   );
 }
 
+function StatusChangeConfirmation({
+  invoice,
+  fromStatus,
+  toStatus,
+  onCancel,
+  onConfirm,
+}: {
+  invoice: string;
+  fromStatus: TeamTaskStatus;
+  toStatus: TeamTaskStatus;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus(true, dialogRef, onCancel, cancelRef);
+
+  const title = toStatus === "Complete"
+    ? "Complete this task?"
+    : toStatus === "Delayed"
+      ? "Mark this task as delayed?"
+      : toStatus === "In Progress"
+        ? "Start this task?"
+        : "Move this task to pending?";
+  const detail = toStatus === "Complete"
+    ? "This marks the work as finished and notifies the manager."
+    : toStatus === "Delayed"
+      ? "This flags the task for attention and notifies the manager."
+      : "The manager will see this status update immediately.";
+
+  return (
+    <div className="status-confirm-backdrop" onMouseDown={onCancel}>
+      <section
+        ref={dialogRef}
+        className="status-confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="status-confirm-title"
+        aria-describedby="status-confirm-description"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <span className={`status-confirm-dialog__icon status-confirm-dialog__icon--${statusClass(toStatus)}`} aria-hidden="true">
+          <LayeredIcon kind={toStatus === "Complete" ? "complete" : toStatus === "Delayed" ? "danger" : toStatus === "In Progress" ? "progress" : "clock"} />
+        </span>
+        <div className="status-confirm-dialog__copy">
+          <span className="status-confirm-dialog__eyebrow">{invoice}</span>
+          <h2 id="status-confirm-title">{title}</h2>
+          <p id="status-confirm-description">Change status from <strong>{fromStatus}</strong> to <strong>{toStatus}</strong>. {detail}</p>
+        </div>
+        <div className="status-confirm-dialog__actions">
+          <button ref={cancelRef} type="button" onClick={onCancel}>Cancel</button>
+          <button type="button" onClick={onConfirm}>Yes, change status</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function TaskType({ type }: { type: Task["type"] }) {
   return (
     <span className={`task-type task-type--${type.toLowerCase()}`}>
@@ -1983,6 +2041,7 @@ function WarehouseTeamDashboard({
   const [activeSettings, setActiveSettings] = useState<SettingsSection | null>(null);
   const [scope, setScope] = useState<TeamScope>("My Tasks");
   const [openStatusInvoice, setOpenStatusInvoice] = useState<string | null>(null);
+  const [pendingStatusChange, setPendingStatusChange] = useState<{ invoice: string; fromStatus: TeamTaskStatus; toStatus: TeamTaskStatus } | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Task | null>(null);
   const [isOrderEditing, setIsOrderEditing] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
@@ -2068,6 +2127,12 @@ function WarehouseTeamDashboard({
     setOpenStatusInvoice(null);
     onNoticesChange((current) => [{ id: crypto.randomUUID(), title: "Task status updated", message: `${invoice} is now ${status}.`, time: "Just now", read: false }, ...current]);
     setFeedback(`${invoice} moved to ${status}.`);
+  }
+
+  function requestTaskStatusChange(task: TeamTask, status: TeamTaskStatus) {
+    setOpenStatusInvoice(null);
+    if (task.status === status) return;
+    setPendingStatusChange({ invoice: task.invoice, fromStatus: task.status, toStatus: status });
   }
 
   return (
@@ -2268,7 +2333,7 @@ function WarehouseTeamDashboard({
                               type="button"
                               aria-pressed={task.status === status}
                               key={status}
-                              onClick={() => updateTaskStatus(task.invoice, status)}
+                              onClick={() => requestTaskStatusChange(task, status)}
                             >
                               {status}
                             </button>
@@ -2303,6 +2368,19 @@ function WarehouseTeamDashboard({
           warehouse={selectedWarehouse}
           tasks={scopeTasks.filter((task) => task.location === selectedWarehouse.name && isDateInRange(task.isoDate, dateRange))}
           onClose={() => setSelectedWarehouse(null)}
+        />
+      ) : null}
+
+      {pendingStatusChange ? (
+        <StatusChangeConfirmation
+          invoice={pendingStatusChange.invoice}
+          fromStatus={pendingStatusChange.fromStatus}
+          toStatus={pendingStatusChange.toStatus}
+          onCancel={() => setPendingStatusChange(null)}
+          onConfirm={() => {
+            updateTaskStatus(pendingStatusChange.invoice, pendingStatusChange.toStatus);
+            setPendingStatusChange(null);
+          }}
         />
       ) : null}
 
