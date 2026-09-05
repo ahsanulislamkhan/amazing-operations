@@ -1,12 +1,14 @@
 "use client";
 
-import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { DateRange } from "@/lib/operations/types";
 import "./date-filter.css";
 
 export type DateFilterProps = {
   value: DateRange;
   onChange: (range: DateRange) => void;
+  mode?: "range" | "single";
+  name?: string;
 };
 
 type RangeEndpoint = "from" | "to";
@@ -77,13 +79,14 @@ function calendarWeeks(month: Date) {
   }));
 }
 
-export default function DateFilter({ value, onChange }: DateFilterProps) {
+export default function DateFilter({ value, onChange, mode = "range", name }: DateFilterProps) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [activeEndpoint, setActiveEndpoint] = useState<RangeEndpoint>("from");
   const [visibleMonth, setVisibleMonth] = useState(() => monthFromIso(value.from ?? value.to ?? todayInMelbourne()));
   const [popoverStyle, setPopoverStyle] = useState<CSSProperties>({});
   const [error, setError] = useState("");
+  const [focusDate, setFocusDate] = useState(value.from ?? todayInMelbourne());
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
@@ -114,16 +117,23 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
     }
     function escape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
       setOpen(false);
       triggerRef.current?.focus();
     }
     document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", escape);
+    const focusFrame = window.requestAnimationFrame(() => {
+      const root = rootRef.current;
+      (root?.querySelector<HTMLButtonElement>(".date-filter__day--selected") ?? root?.querySelector<HTMLButtonElement>(".date-filter__day--today") ?? root?.querySelector<HTMLButtonElement>(".date-filter__day"))?.focus();
+    });
+    window.addEventListener("keydown", escape, true);
     window.addEventListener("resize", positionPopover);
     window.addEventListener("scroll", positionPopover, true);
     return () => {
       document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", escape);
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", escape, true);
       window.removeEventListener("resize", positionPopover);
       window.removeEventListener("scroll", positionPopover, true);
     };
@@ -133,6 +143,7 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
     setDraft(value);
     setActiveEndpoint(value.from && !value.to ? "to" : "from");
     setVisibleMonth(monthFromIso(value.from ?? value.to ?? today));
+    setFocusDate(value.from ?? value.to ?? today);
     setError("");
     positionPopover();
     setOpen(true);
@@ -151,6 +162,7 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
 
   function selectDate(iso: string) {
     setError("");
+    if (mode === "single") { setDraft({ from: iso, to: iso }); return; }
     if (activeEndpoint === "from") {
       setDraft((current) => ({ from: iso, to: current.to && current.to >= iso ? current.to : null }));
       setActiveEndpoint("to");
@@ -164,7 +176,26 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
     setActiveEndpoint("from");
   }
 
+  function moveCalendarFocus(event: ReactKeyboardEvent<HTMLButtonElement>, iso: string) {
+    const date = dateFromIso(iso);
+    const offsets: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7, Home: -date.getUTCDay(), End: 6 - date.getUTCDay() };
+    if (event.key in offsets) date.setUTCDate(date.getUTCDate() + offsets[event.key]);
+    else if (event.key === "PageUp" || event.key === "PageDown") {
+      const day = date.getUTCDate();
+      date.setUTCDate(1);
+      date.setUTCMonth(date.getUTCMonth() + (event.key === "PageUp" ? -1 : 1) * (event.shiftKey ? 12 : 1));
+      const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+      date.setUTCDate(Math.min(day, lastDay));
+    } else return;
+    event.preventDefault();
+    const next = isoFromDate(date);
+    setFocusDate(next);
+    setVisibleMonth(monthFromIso(next));
+    window.requestAnimationFrame(() => rootRef.current?.querySelector<HTMLButtonElement>(`[data-date="${next}"]`)?.focus());
+  }
+
   function chooseToday() {
+    if (mode === "single") { setDraft({ from: today, to: today }); setVisibleMonth(monthFromIso(today)); return; }
     onChange({ from: today, to: today });
     setDraft({ from: today, to: today });
     setError("");
@@ -183,27 +214,30 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
   const visibleMonthLabel = new Intl.DateTimeFormat("en-AU", { month: "long", year: "numeric", timeZone: "UTC" }).format(visibleMonth);
 
   return (
-    <div className="date-filter" ref={rootRef}>
-      <button ref={triggerRef} className="date-filter__trigger" type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => open ? setOpen(false) : openCalendar()}>
+    <div className={`date-filter${mode === "single" ? " date-filter--single" : ""}`} ref={rootRef}>
+      {name ? <input type="hidden" name={name} value={value.from ?? ""} /> : null}
+      <button ref={triggerRef} className="date-filter__trigger" type="button" aria-label={mode === "single" ? `Schedule date: ${displayDate(value.from)}` : undefined} aria-haspopup="dialog" aria-expanded={open} onClick={() => open ? setOpen(false) : openCalendar()}>
+        {mode === "single" ? <><span>{displayDate(value.from)}</span><img className="schedule-calendar-icon" src="/assets/icon-calendar.svg" alt="" /></> : <>
         <span className={`date-filter__number${value.from ? "" : " date-filter__number--all"}`}>{label.number}</span>
         <span className="date-filter__copy"><span>{label.top}</span><span className="date-filter__month-year">{label.bottom}</span></span>
         <span className={`date-filter__trigger-chevron${open ? " date-filter__trigger-chevron--open" : ""}`} aria-hidden="true"><img src="/assets/icon-dropdown-path.svg" alt="" /></span>
+        </>}
       </button>
       {open ? (
         <section className="date-filter__popover" style={popoverStyle} role="dialog" aria-modal="false" aria-labelledby={titleId}>
           <div className="date-filter__body">
             <div className="date-filter__popover-heading">
-              <div><span className="date-filter__eyebrow">Schedule</span><h2 id={titleId}>Date range</h2></div>
-              <span className="date-filter__selection-summary">Inclusive</span>
+              <div><span className="date-filter__eyebrow">Schedule</span><h2 id={titleId}>{mode === "single" ? "Schedule date" : "Date range"}</h2></div>
+              <span className="date-filter__selection-summary">{mode === "single" ? displayDate(draft.from) : "Inclusive"}</span>
             </div>
-            <div className="date-filter__range-fields">
+            {mode === "range" ? <div className="date-filter__range-fields">
               <button className={activeEndpoint === "from" ? "date-filter__range-field date-filter__range-field--active" : "date-filter__range-field"} type="button" onClick={() => { setActiveEndpoint("from"); setError(""); }}>
                 <span>Start date</span><strong>{displayDate(draft.from)}</strong>
               </button>
               <button className={activeEndpoint === "to" ? "date-filter__range-field date-filter__range-field--active" : "date-filter__range-field"} type="button" onClick={() => { setActiveEndpoint("to"); setError(""); }}>
                 <span>End date</span><strong>{displayDate(draft.to)}</strong>
               </button>
-            </div>
+            </div> : null}
             <div className="date-filter__month-navigation">
               <button className="date-filter__icon-button" type="button" aria-label="Previous month" onClick={() => setVisibleMonth((current) => shiftMonth(current, -1))}><img className="date-filter__arrow--left" src="/assets/icon-arrow-right.svg" alt="" /></button>
               <strong>{visibleMonthLabel}</strong>
@@ -213,12 +247,12 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
               <div className="date-filter__weekdays" role="row">{WEEKDAYS.map((weekday) => <span role="columnheader" key={weekday}>{weekday}</span>)}</div>
               <div className="date-filter__days">
                 {weeks.map((week, index) => <div className="date-filter__week" role="row" key={index}>{week.map((day) => day.inMonth ? (
-                  <span role="gridcell" key={day.iso}><button className={`date-filter__day${day.iso === today ? " date-filter__day--today" : ""}${day.iso === draft.from || day.iso === draft.to ? " date-filter__day--selected" : ""}${draft.from && draft.to && day.iso > draft.from && day.iso < draft.to ? " date-filter__day--in-range" : ""}`} type="button" aria-label={new Intl.DateTimeFormat("en-AU", { dateStyle: "full", timeZone: "UTC" }).format(day.date)} aria-pressed={day.iso === draft.from || day.iso === draft.to} onClick={() => selectDate(day.iso)}>{day.date.getUTCDate()}</button></span>
+                  <span role="gridcell" key={day.iso}><button className={`date-filter__day${day.iso === today ? " date-filter__day--today" : ""}${day.iso === draft.from || day.iso === draft.to ? " date-filter__day--selected" : ""}${draft.from && draft.to && day.iso > draft.from && day.iso < draft.to ? " date-filter__day--in-range" : ""}`} type="button" data-date={day.iso} tabIndex={day.iso === focusDate || (!weeks.flat().some((candidate) => candidate.inMonth && candidate.iso === focusDate) && day.date.getUTCDate() === 1) ? 0 : -1} onFocus={() => setFocusDate(day.iso)} onKeyDown={(event) => moveCalendarFocus(event, day.iso)} aria-label={new Intl.DateTimeFormat("en-AU", { dateStyle: "full", timeZone: "UTC" }).format(day.date)} aria-pressed={day.iso === draft.from || day.iso === draft.to} onClick={() => selectDate(day.iso)}>{day.date.getUTCDate()}</button></span>
                 ) : <span className="date-filter__empty-day" role="gridcell" aria-hidden="true" key={day.iso} />)}</div>)}
               </div>
             </div>
             {error ? <p className="date-filter__error" role="alert">{error}</p> : null}
-            <div className="date-filter__quick-actions"><button type="button" onClick={chooseToday}>Today</button><button type="button" onClick={chooseAll}>All Dates</button></div>
+            <div className="date-filter__quick-actions"><button type="button" onClick={chooseToday}>Today</button>{mode === "range" ? <button type="button" onClick={chooseAll}>All Dates</button> : null}</div>
           </div>
           <div className="date-filter__actions"><button className="date-filter__action date-filter__action--secondary" type="button" onClick={() => { setDraft(value); setError(""); setOpen(false); triggerRef.current?.focus(); }}>Cancel</button><button className="date-filter__action date-filter__action--primary" type="button" onClick={apply}>Done</button></div>
         </section>

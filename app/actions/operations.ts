@@ -207,6 +207,7 @@ async function staffAccessRedirectUrl() {
 async function inviteSavedStaff(
   supabase: SupabaseClient,
   staff: StaffInviteRecord,
+  managerId: string,
 ): Promise<StaffInviteAttempt> {
   const admin = createSupabaseAdminClient();
   if (!admin) {
@@ -224,6 +225,7 @@ async function inviteSavedStaff(
     redirectTo: await staffAccessRedirectUrl(),
   });
   if (error) {
+    await admin.from("notifications").insert({ staff_id: managerId, event: "task_changed", title: "Staff invitation failed", body: `The invitation for ${staff.full_name} could not be sent. Open Role Management to review and retry.`, notification_key: `invitation-failed:${staff.id}:${managerId}:${new Date().toISOString().slice(0, 10)}` }).select("id");
     return { ok: false, error: staffInvitationError(error), code: error.code, retryAvailable: staffInvitationCanRetry(error), invitationSent: false };
   }
 
@@ -234,7 +236,12 @@ async function inviteSavedStaff(
     .select("id")
     .single();
 
-  if (!updateError) return { ok: true };
+  if (!updateError) {
+    await admin.from("notifications").insert({ staff_id: managerId, event: "task_changed", title: "Staff invitation sent", body: `A secure invitation has been sent to ${staff.full_name}. They can set their password from the email.` });
+    return { ok: true };
+  }
+
+  await admin.from("notifications").insert({ staff_id: managerId, event: "task_changed", title: "Staff invitation needs attention", body: `The invitation for ${staff.full_name} was sent, but linking their login failed. Contact your Supabase administrator before retrying.` });
 
   return {
     ok: false,
@@ -339,7 +346,7 @@ export async function createAndInviteStaffAction(input: unknown): Promise<Create
     id: staffId.data,
     email: staff.email,
     full_name: staff.fullName,
-  });
+  }, context.data.profile.id);
   if (!invitation.ok) return profileCreatedFailure(invitation);
 
   const refreshed = await refreshAfterMutation();
@@ -387,7 +394,7 @@ export async function inviteStaffAction(staffIdValue: unknown): Promise<ActionRe
     }
   }
 
-  const invitation = await inviteSavedStaff(context.data.supabase, staff);
+  const invitation = await inviteSavedStaff(context.data.supabase, staff, context.data.profile.id);
   if (!invitation.ok) return { ok: false, error: invitation.error, code: invitation.code };
   return refreshAfterMutation();
 }

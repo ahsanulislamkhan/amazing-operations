@@ -156,6 +156,9 @@ export async function loadOperationsSnapshot(): Promise<ActionResult<OperationsS
   if (!context.ok) return context;
   const { supabase, profile } = context.data;
 
+  const reminders = await supabase.rpc("refresh_my_task_reminders");
+  if (reminders.error) return { ok: false, error: "Task reminders could not be refreshed. Please retry.", code: reminders.error.code };
+
   const [tasksResult, warehousesResult, staffResult, noticesResult, preferencesResult, auditResult] = await Promise.all([
     supabase.from("tasks").select(`
       id, invoice, type, warehouse_id, scheduled_at, status, description, priority, version, archived_at,
@@ -208,11 +211,7 @@ export async function loadOperationsSnapshot(): Promise<ActionResult<OperationsS
 
   const preferenceRow = asObject(preferencesResult.data);
   const preferences = { ...defaultPreferences, ...asObject(preferenceRow.preferences) } as NotificationPreferencesDTO;
-  const notices: NoticeDTO[] = asArray(noticesResult.data).filter((noticeValue) => {
-    const event = String(asObject(noticeValue).event);
-    if (event === "invitation" || event === "password_reset") return true;
-    return preferences[event as keyof NotificationPreferencesDTO]?.inApp !== false;
-  }).map((noticeValue) => {
+  const notices: NoticeDTO[] = asArray(noticesResult.data).map((noticeValue) => {
     const notice = asObject(noticeValue);
     return {
       id: String(notice.id ?? ""),

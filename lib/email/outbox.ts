@@ -29,6 +29,9 @@ function emailHtml(payload: Record<string, unknown>) {
 }
 
 export async function processEmailOutbox(batchSize = 20) {
+  // Operational email is deferred. Re-enabling it requires a verified sender
+  // and an explicit rollout decision, not just a configured API key.
+  if (process.env.OPERATIONS_EMAIL_ENABLED !== "true") return { processed: 0, skipped: true };
   const admin = createSupabaseAdminClient();
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.OPERATIONS_EMAIL_FROM;

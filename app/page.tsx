@@ -4,9 +4,12 @@ import { Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useRef, us
 import Link from "next/link";
 import DateFilter from "./components/DateFilter";
 import MultiAssigneeSelect from "./components/MultiAssigneeSelect";
+import AuditHistory from "./components/AuditHistory";
+import "./components/assessment-updates.css";
 import type { ActionResult, AuditEventDTO, DateRange, NotificationPreferencesDTO, OperationsSnapshot, StaffStatus, TaskDTO } from "@/lib/operations/types";
+import { compareTeamTasks, taskUrgency } from "@/lib/operations/task-order";
 import { canTeamTransition } from "@/lib/operations/types";
-import { changePasswordAction, signInAction, signOutAction } from "./actions/auth";
+import { changePasswordAction, requestOwnPasswordResetAction, signInAction, signOutAction } from "./actions/auth";
 import {
   archiveTaskAction,
   createAndInviteStaffAction,
@@ -300,6 +303,8 @@ function useDialogFocus(
     });
 
     function handleKeyDown(event: KeyboardEvent) {
+      // A nested confirmation owns keyboard handling while this drawer is inert.
+      if (container.closest("[inert]")) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -364,15 +369,6 @@ const defaultNotificationSettings = {
   taskDelayed: true,
   taskCompleted: true,
 };
-
-const notificationOptions = [
-  { key: "assignment", title: "Task assignments", description: "Email me when work is assigned to me." },
-  { key: "reassignment", title: "Task reassignments", description: "Email me when an assignment changes." },
-  { key: "taskChanged", title: "Schedule and warehouse changes", description: "Email me when important task details change." },
-  { key: "noteAdded", title: "Activity notes", description: "Email me when a colleague adds an activity note." },
-  { key: "taskDelayed", title: "Task delays", description: "Email me when a task is marked Delayed." },
-  { key: "taskCompleted", title: "Task completion", description: "Email me when assigned work is completed." },
-] as const;
 
 const warehouses = [
   { office: "Head Office", name: "Sunshine", address: "616 Somerville Road, Sunshine West VIC 3020" },
@@ -762,6 +758,7 @@ function OrderDetailsDrawer({
   readOnlyDetails = false,
   canAddNote = false,
   onAddNote,
+  onStatusChange,
   warehouseOptions = [],
   staffOptions = [],
   onClose,
@@ -776,6 +773,7 @@ function OrderDetailsDrawer({
   readOnlyDetails?: boolean;
   canAddNote?: boolean;
   onAddNote?: (note: string) => void;
+  onStatusChange?: (status: Status) => void;
   warehouseOptions?: Warehouse[];
   staffOptions?: Administrator[];
   onClose: () => void;
@@ -785,7 +783,6 @@ function OrderDetailsDrawer({
   const [newNote, setNewNote] = useState("");
   const closeRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
-  const dateInputRef = useRef<HTMLInputElement>(null);
   useDialogFocus(true, panelRef, onClose, closeRef);
 
   function cancelEditing() {
@@ -795,7 +792,7 @@ function OrderDetailsDrawer({
   }
 
   function saveChanges() {
-    const scheduleDate = dateInputRef.current?.value ?? draft.date;
+    const scheduleDate = draft.date;
     if (!isOperationalDate(scheduleDate)) {
       setOrderError("Choose a valid schedule date.");
       return;
@@ -836,7 +833,7 @@ function OrderDetailsDrawer({
                 <button className="order-edit-button" type="button" onClick={() => { setDraft(order); onEditingChange(true); }}>
                   <img src="/assets/icon-edit.svg" alt="" /> Edit
                 </button>
-              ) : <span className="order-editing-label">Editing</span>}
+              ) : <span className="order-editing-label">{readOnlyDetails ? canAddNote ? "Assigned task" : "Read-only company task" : "Editing"}</span>}
             </div>
             <button ref={closeRef} className="order-panel__close" type="button" aria-label="Close order details" onClick={onClose}>
               <img src="/assets/icon-close.svg" alt="" />
@@ -845,10 +842,10 @@ function OrderDetailsDrawer({
 
           <div className={`order-details ${isEditing ? "order-details--editing" : ""}`}>
             <div className="order-detail-row"><span>Invoice No.</span><strong>{order.invoice}</strong></div>
-            <label className="order-detail-row">
+            <div className="order-detail-row">
               <span>Schedule date</span>
-              {isEditing ? <input ref={dateInputRef} required type="date" value={draft.date} aria-label="Schedule date" onChange={(event) => { setOrderError(""); setDraft({ ...draft, date: event.target.value }); }} /> : <strong>{order.scheduled}</strong>}
-            </label>
+              {isEditing ? <DateFilter mode="single" value={{ from: draft.date, to: draft.date }} onChange={(range) => { if (range.from) { setOrderError(""); setDraft({ ...draft, date: range.from }); } }} /> : <strong>{order.scheduled}</strong>}
+            </div>
             <label className="order-detail-row">
               <span>Type</span>
               {isEditing ? (
@@ -871,7 +868,7 @@ function OrderDetailsDrawer({
                 <select value={draft.status} aria-label="Status" onChange={(event) => setDraft({ ...draft, status: event.target.value as Status })}>
                   {(["Pending", "In Progress", "Complete", "Delayed"] as Status[]).map((status) => <option value={status} key={status}>{statusLabels?.[status] ?? status}</option>)}
                 </select>
-              ) : <strong><span className={`status status--${statusClass(order.status)}`}>{statusLabels?.[order.status] ?? order.status}</span></strong>}
+              ) : onStatusChange ? <select aria-label="Update task status" value={order.status} onChange={(event) => onStatusChange(event.target.value as Status)}>{(["Pending", "In Progress", "Complete", "Delayed"] as Status[]).filter((status) => canTeamTransition(statusToDto(order.status), statusToDto(status))).map((status) => <option key={status}>{status}</option>)}</select> : <strong><span className={`status status--${statusClass(order.status)}`}>{statusLabels?.[order.status] ?? order.status}</span></strong>}
             </label>
 
             <div className="order-description">
@@ -1012,15 +1009,13 @@ function SettingsPage({
   onSignOut,
   account,
   onAccountChange,
-  notifications,
-  onNotificationsChange,
   administrators,
   onAdministratorsChange,
   onFeedback,
   canManageRoles,
   warehouses,
-  auditEvents,
   onSnapshot,
+  onOpenAuditRecord,
 }: {
   activeSection: SettingsSection;
   onSectionChange: (section: SettingsSection) => void;
@@ -1036,10 +1031,10 @@ function SettingsPage({
   warehouses: Warehouse[];
   auditEvents: AuditEventDTO[];
   onSnapshot?: (snapshot: OperationsSnapshot) => void;
+  onOpenAuditRecord?: (event: AuditEventDTO) => void;
 }) {
   const [accountDraft, setAccountDraft] = useState(account);
   const [passwords, setPasswords] = useState({ current: "", next: "", confirm: "" });
-  const [notificationDraft, setNotificationDraft] = useState(notifications);
   const [administratorDraft, setAdministratorDraft] = useState(administrators);
   const [roleStatusFilter, setRoleStatusFilter] = useState("All status");
   const [isAdministrationModalOpen, setIsAdministrationModalOpen] = useState(false);
@@ -1050,6 +1045,9 @@ function SettingsPage({
   const [isAdministratorSubmitting, setIsAdministratorSubmitting] = useState(false);
   const [isRoleChangesSaving, setIsRoleChangesSaving] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordPending, setPasswordPending] = useState(false);
+  const [recoveryPending, setRecoveryPending] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState("");
   const administrationModalRef = useRef<HTMLElement>(null);
   const administrationFirstInputRef = useRef<HTMLInputElement>(null);
   const administratorTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1230,7 +1228,13 @@ function SettingsPage({
       setPasswordMessage("The new passwords do not match.");
       return;
     }
-    const result = await changePasswordAction({ email: account.email, currentPassword: passwords.current, newPassword: passwords.next });
+    if (passwordPending) return;
+    setPasswordPending(true);
+    setPasswordMessage("");
+    let result: ActionResult;
+    try { result = await changePasswordAction({ email: account.email, currentPassword: passwords.current, newPassword: passwords.next }); }
+    catch { result = { ok: false, error: "Could not update your password. Please try again." }; }
+    finally { setPasswordPending(false); }
     if (!result.ok) { setPasswordMessage(result.error); return; }
     setPasswords({ current: "", next: "", confirm: "" });
     setPasswordMessage("Password updated and ready for your next sign-in.");
@@ -1362,54 +1366,44 @@ function SettingsPage({
             </div>
           ) : null}
 
-          {canManageRoles && activeSection === "Audit History" ? (
-            <div className="settings-view settings-view--roles">
-              <div className="role-management-header">
-                <div className="settings-intro">
-                  <h2>Audit History</h2>
-                  <p>An immutable record of manager changes to staff, warehouses, and tasks.</p>
-                </div>
-              </div>
-              <div className="administrators-table-wrap" role="region" aria-label="Audit history" tabIndex={0}>
-                <p className="table-scroll-hint">Scroll horizontally to see every audit field.</p>
-                <div className="administrators-table audit-table" role="table" aria-label="Audit history events">
-                  <div className="administrators-row administrators-row--head" role="row">
-                    <span role="columnheader">When</span><span role="columnheader">Actor</span><span role="columnheader">Record</span><span role="columnheader">Action</span><span role="columnheader">Reference</span>
-                  </div>
-                  {auditEvents.map((event) => {
-                    const values = event.afterData ?? event.beforeData ?? {};
-                    const reference = String(values.invoice ?? values.full_name ?? values.name ?? event.entityId?.slice(0, 8) ?? "—");
-                    return <div className="administrators-row" role="row" key={event.id}>
-                      <span role="cell">{new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: "Australia/Melbourne" }).format(new Date(event.createdAt))}</span>
-                      <span role="cell">{event.actorName}</span>
-                      <span role="cell">{event.entityType.replaceAll("_", " ")}</span>
-                      <span role="cell">{event.action}</span>
-                      <span role="cell">{reference}</span>
-                    </div>;
-                  })}
-                  {!auditEvents.length ? <p className="settings-empty-state">No audit events have been recorded yet.</p> : null}
-                </div>
-              </div>
-            </div>
-          ) : null}
+          {canManageRoles && activeSection === "Audit History" ? <AuditHistory staff={administrators.map(({id,name}) => ({id,name}))} warehouses={warehouses.map(({id,name}) => ({id: id ?? "",name}))} onOpenRecord={(event) => {
+            const values = event.afterData ?? event.beforeData ?? {};
+            const memberId = event.entityType === "staff_profiles" ? event.entityId : String(values.staff_id ?? event.entityId ?? "");
+            const member = event.entityType.startsWith("staff_") ? administratorDraft.find((candidate) => candidate.id === memberId) : undefined;
+            if (member) {
+              onSectionChange("Role Management");
+              setRoleStatusFilter(member.status === "Archived" ? "Archived" : "All status");
+              openAdministratorModal(member);
+            } else onOpenAuditRecord?.(event);
+          }} /> : null}
 
           {activeSection === "Password" ? (
             <form className="settings-view" onSubmit={submitPassword}>
               <div className="settings-form-layout">
                 <div className="settings-intro">
                   <h2>Password</h2>
-                  <p>Switch up your password or check it out!<br />Change it if want.</p>
+                  <p>Use a unique password with at least 10 characters.</p>
                 </div>
                 <div className="settings-fields">
-                  <label className="settings-field"><span>Current Password<em>*</em></span><input required type="password" placeholder="*********" value={passwords.current} onChange={(event) => setPasswords({ ...passwords, current: event.target.value })} /></label>
-                  <label className="settings-field"><span>New Password<em>*</em></span><input required type="password" placeholder="*********" value={passwords.next} onChange={(event) => setPasswords({ ...passwords, next: event.target.value })} /></label>
-                  <label className="settings-field"><span>Confirm Password<em>*</em></span><input required type="password" placeholder="*********" value={passwords.confirm} onChange={(event) => setPasswords({ ...passwords, confirm: event.target.value })} /></label>
+                  <label className="settings-field"><span>Current Password<em>*</em></span><input required type="password" autoComplete="current-password" placeholder="Current password" value={passwords.current} onChange={(event) => setPasswords({ ...passwords, current: event.target.value })} /></label>
+                  <label className="settings-field"><span>New Password<em>*</em></span><input required type="password" autoComplete="new-password" minLength={10} placeholder="New password" value={passwords.next} onChange={(event) => setPasswords({ ...passwords, next: event.target.value })} /></label>
+                  <label className="settings-field"><span>Confirm Password<em>*</em></span><input required type="password" autoComplete="new-password" minLength={10} placeholder="Confirm new password" value={passwords.confirm} onChange={(event) => setPasswords({ ...passwords, confirm: event.target.value })} /></label>
                 </div>
+              </div>
+              <div className="password-recovery">
+                <button type="button" className="secondary-button" disabled={recoveryPending} onClick={async () => {
+                  setRecoveryPending(true); setRecoveryMessage("");
+                  try { const result = await requestOwnPasswordResetAction(); setRecoveryMessage(result.ok ? "Reset email sent to your account. Follow the secure link to choose a new password." : result.error); }
+                  catch { setRecoveryMessage("Could not send the reset email. Please try again."); }
+                  finally { setRecoveryPending(false); }
+                }}>{recoveryPending ? "Sending reset email…" : "Forgot current password?"}</button>
+                <p>Send a secure reset link to {account.email}.</p>
+                {recoveryMessage ? <p role="status">{recoveryMessage}</p> : null}
               </div>
               {passwordMessage ? <p className={`settings-message ${passwordMessage.includes("updated") ? "settings-message--success" : "settings-message--error"}`} role="status">{passwordMessage}</p> : null}
               <div className="settings-actions">
                 <button type="button" onClick={() => { setPasswords({ current: "", next: "", confirm: "" }); setPasswordMessage(""); }}>Cancel</button>
-                <button type="submit">Save change</button>
+                <button type="submit" disabled={passwordPending}>{passwordPending ? "Saving…" : "Save change"}</button>
               </div>
             </form>
           ) : null}
@@ -1418,31 +1412,20 @@ function SettingsPage({
             <div className="settings-view">
               <div className="notification-layout">
                 <div className="settings-intro">
-                  <h2>Operational notifications</h2>
-                  <p>Choose which operational events also send<br />you an email. In-app security and access<br />messages remain available.</p>
+                  <h2>In-app notifications</h2>
+                  <p>Updates appear in the notification bell. Operational email is paused.</p>
+                  <p>Invitations and password recovery still use secure account emails.</p>
                 </div>
                 <div className="notification-list">
-                  {notificationOptions.map((option) => {
-                    const enabled = notificationDraft[option.key];
-                    return (
-                      <div className="notification-option" key={option.key}>
-                        <span><strong>{option.title}</strong><small>{option.description}</small></span>
-                        <button
-                          className={`settings-toggle ${enabled ? "settings-toggle--on" : ""}`}
-                          type="button"
-                          role="switch"
-                          aria-checked={enabled}
-                          aria-label={option.title}
-                          onClick={() => setNotificationDraft({ ...notificationDraft, [option.key]: !enabled })}
-                        ><i /></button>
-                      </div>
-                    );
-                  })}
+                  {[
+                    ...(!canManageRoles ? [{ title: "Assignments and access to tasks", description: "Work assigned to you, reassigned, or removed from your queue." }] : []),
+                    { title: "Schedules and warehouse changes", description: canManageRoles ? "Important changes across company tasks." : "Schedule, warehouse or item changes on your assigned work." },
+                    { title: "Progress and activity", description: "New notes, delays, completion and reopened tasks." },
+                    { title: "Due today and overdue", description: canManageRoles ? "Overdue unfinished work across the company." : "Your incomplete tasks due today or overdue." },
+                    { title: "Priority and archives", description: "Priority changes and tasks archived or restored." },
+                    ...(canManageRoles ? [{ title: "Staff access", description: "Invitations, roles, warehouse access and account-status changes." }] : []),
+                  ].map((option) => <div className="notification-option" key={option.title}><span><strong>{option.title}</strong><small>{option.description}</small></span><span className="notification-channel">In app</span></div>)}
                 </div>
-              </div>
-              <div className="settings-actions">
-                <button type="button" onClick={() => setNotificationDraft(notifications)}>Cancel</button>
-                <button type="button" onClick={() => { onNotificationsChange(notificationDraft); onFeedback("Notification preferences saved."); }}>Save change</button>
               </div>
             </div>
           ) : null}
@@ -1537,7 +1520,9 @@ function Dashboard({
   const [activeSettings, setActiveSettings] = useState<SettingsSection | null>(null);
   const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
   const [newTaskType, setNewTaskType] = useState<Task["type"]>("Pickup");
-  const [isPriority, setIsPriority] = useState(true);
+  const [isPriority, setIsPriority] = useState(false);
+  const [newTaskDate, setNewTaskDate] = useState(todayInMelbourne());
+  const [overviewWarehouse, setOverviewWarehouse] = useState("All warehouse");
   const [taskSearch, setTaskSearch] = useState("");
   const [warehouseFilter, setWarehouseFilter] = useState("All warehouse");
   const [statusFilter, setStatusFilter] = useState("All status");
@@ -1586,7 +1571,8 @@ function Dashboard({
   const hasDateFilter = Boolean(dateRange.from || dateRange.to);
   const activeTasks = tasks.filter((task) => !task.archivedAt);
   const dateFilteredTasks = activeTasks.filter((task) => isDateInRange(task.date, dateRange));
-  const visibleTasks = dateFilteredTasks.slice(0, 7);
+  const scopedDashboardTasks = dateFilteredTasks.filter((task) => overviewWarehouse === "All warehouse" || task.warehouse === overviewWarehouse);
+  const visibleTasks = scopedDashboardTasks.slice(0, 7);
   const filteredTasks = tasks.filter((task) => {
     const search = taskSearch.trim().toLowerCase();
     const matchesSearch = !search || [task.invoice, task.type, task.warehouse, task.assignee, task.description, task.notes, ...task.items.map((item) => item.name)].some((value) => value.toLowerCase().includes(search));
@@ -1597,15 +1583,36 @@ function Dashboard({
   });
 
   const dashboardStats = [
-    { label: "Pending", value: padCount(dateFilteredTasks.filter((task) => task.status === "Pending").length), note: hasDateFilter ? dateRangeLabel(dateRange) : "Across all scheduled dates", tone: "blue", icon: "clock" },
-    { label: "In Progress", value: padCount(dateFilteredTasks.filter((task) => task.status === "In Progress").length), note: "Active operations", tone: "purple", icon: "clock" },
-    { label: "Complete", value: padCount(dateFilteredTasks.filter((task) => task.status === "Complete").length), note: hasDateFilter ? "Completed in selected range" : "Completed operations", tone: "green", icon: "complete" },
-    { label: "Delayed", value: padCount(dateFilteredTasks.filter((task) => task.status === "Delayed").length), note: dateFilteredTasks.some((task) => task.status === "Delayed") ? "Needs your attention" : "No delays in this view", tone: "red", icon: "danger" },
+    { label: "Pending", value: padCount(scopedDashboardTasks.filter((task) => task.status === "Pending").length), note: hasDateFilter ? dateRangeLabel(dateRange) : "Across all scheduled dates", tone: "blue", icon: "clock" },
+    { label: "In Progress", value: padCount(scopedDashboardTasks.filter((task) => task.status === "In Progress").length), note: "Active operations", tone: "purple", icon: "progress" },
+    { label: "Complete", value: padCount(scopedDashboardTasks.filter((task) => task.status === "Complete").length), note: hasDateFilter ? "Completed in selected range" : "Completed operations", tone: "green", icon: "complete" },
+    { label: "Delayed", value: padCount(scopedDashboardTasks.filter((task) => task.status === "Delayed").length), note: scopedDashboardTasks.some((task) => task.status === "Delayed") ? "Needs your attention" : "No delays in this view", tone: "red", icon: "danger" },
   ];
   const liveWarehouses = warehousesWithLiveStats(dateFilteredTasks, warehouses.filter((warehouse) => !warehouse.archivedAt));
   const displayedWarehouses = warehouseListFilter === "Active"
     ? liveWarehouses
     : warehousesWithLiveStats(tasks.filter((task) => isDateInRange(task.date, dateRange)), warehouses.filter((warehouse) => warehouse.archivedAt));
+
+  function openFilteredTasks(status = "All status", warehouse = overviewWarehouse) {
+    setStatusFilter(status); setWarehouseFilter(warehouse); setTaskSearch("");
+    setActiveSettings(null); setActiveNav("Tasks");
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
+
+  function openAuditRecord(event: AuditEventDTO) {
+    const values = event.afterData ?? event.beforeData ?? {};
+    const taskId = event.entityType === "tasks" ? event.entityId : String(values.task_id ?? "");
+    const task = tasks.find((candidate) => candidate.id === taskId);
+    if (task) { setSelectedOrder(task); setIsOrderEditing(false); return; }
+    const warehouse = warehouses.find((candidate) => candidate.id === event.entityId);
+    if (event.entityType === "warehouses" && warehouse) { setSelectedWarehouse(warehouse); return; }
+    const staffId = event.entityType === "staff_profiles" ? event.entityId : String(values.staff_id ?? "");
+    if (administrators.some((member) => member.id === staffId)) {
+      setActiveSettings("Role Management");
+      setFeedback("Related team member is available in Role Management."); return;
+    }
+    setFeedbackTone("error"); setFeedback("This record is no longer available. Its history is preserved here.");
+  }
 
   function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1700,7 +1707,9 @@ function Dashboard({
   return (
     <main className="dashboard-shell">
       <header className="topbar">
-        <a className="brand" href="#overview" aria-label="Amazing Operations home" onClick={() => { setActiveSettings(null); setActiveNav("Dashboard"); }}>
+        {/* A full document navigation intentionally reloads data and resets role routing. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a className="brand" href="/" aria-label="Amazing Operations home">
           <span className="brand__mark-wrap"><img className="brand__mark" src="/assets/logo-mark.svg" alt="" /></span>
           <img className="brand__word" src="/assets/logo-wordmark.svg" alt="Amazing Operations" />
         </a>
@@ -1766,8 +1775,9 @@ function Dashboard({
           <p>{activeSettings ? <>The settings and administrative features play a crucial<br className="desktop-break" /> role.</> : activeNav === "Tasks" ? "Plan, assign and track every pickup, delivery and container." : activeNav === "Warehouses" ? <>Your active Amazing Tiles warehouse<br className="desktop-break" /> locations.</> : hasDateFilter ? `Showing operations for ${dateRangeLabel(dateRange)}.` : <>Everything moving smoothly through your warehouse<br className="desktop-break" /> network.</>}</p>
         </div>
         {!activeSettings ? <div className="overview-actions">
+          {activeNav === "Dashboard" ? <select className="overview-warehouse-filter" aria-label="Dashboard warehouse" value={overviewWarehouse} onChange={(event) => setOverviewWarehouse(event.target.value)}><option value="All warehouse">All warehouses</option>{warehouses.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => <option key={warehouse.id} value={warehouse.name}>{warehouse.name}</option>)}</select> : null}
           <DateFilter value={dateRange} onChange={setDateRange} />
-          {activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => { setNewTaskAssigneeIds([]); setIsTaskPanelOpen(true); }}>
+          {activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => { setNewTaskAssigneeIds([]); setNewTaskDate(activeDate ?? dateRange.from ?? todayInMelbourne()); setIsPriority(false); setIsTaskPanelOpen(true); }}>
             <img src="/assets/icon-add.svg" alt="" /> Add new task
           </button> : null}
         </div> : null}
@@ -1789,6 +1799,7 @@ function Dashboard({
           warehouses={warehouses}
           auditEvents={auditEvents}
           onSnapshot={onSnapshot}
+          onOpenAuditRecord={openAuditRecord}
         />
       ) : activeNav === "Warehouses" ? (
         <>
@@ -1850,19 +1861,29 @@ function Dashboard({
         <>
           <section className="stats-grid" aria-label="Filtered operations summary">
             {dashboardStats.map((stat) => (
-              <article className="stat-card" key={stat.label}>
+              <button type="button" className="stat-card stat-card--interactive" key={stat.label} aria-label={`View ${stat.value} ${stat.label.toLowerCase()} tasks`} onClick={() => openFilteredTasks(stat.label)}>
                 <div className={`stat-label stat-label--${stat.tone}`}><LayeredIcon kind={stat.icon} /> {stat.label}</div>
                 <strong>{stat.value}</strong>
                 <span className={`stat-note stat-note--${stat.tone}`}>{stat.note}</span>
-              </article>
+              </button>
             ))}
+          </section>
+
+          <section className="warehouse-breakdown" aria-labelledby="warehouse-breakdown-title">
+            <div className="task-board__header"><div><h2 id="warehouse-breakdown-title">By warehouse</h2><span>{dateRangeLabel(dateRange)} · Task status at each location</span></div></div>
+            <div className="warehouse-breakdown__head" aria-hidden="true"><span>Warehouse</span>{["Pending", "In Progress", "Complete", "Delayed"].map((status) => <span key={status}>{status}</span>)}</div>
+            {liveWarehouses.filter((warehouse) => overviewWarehouse === "All warehouse" || warehouse.name === overviewWarehouse).map((warehouse) => <div className="warehouse-breakdown__row" key={warehouse.id}>
+              <button type="button" className="warehouse-breakdown__name" onClick={() => openFilteredTasks("All status", warehouse.name)}>{warehouse.name}</button>
+              {warehouse.statuses.map((status) => <button type="button" className={`warehouse-breakdown__count stat-note--${status.tone}`} key={status.label} aria-label={`View ${warehouse.name}: ${status.value} ${status.label} tasks`} onClick={() => openFilteredTasks(status.label, warehouse.name)}><span className="warehouse-breakdown__mobile-label">{status.label}</span><strong>{status.value}</strong></button>)}
+            </div>)}
+            {!liveWarehouses.length ? <p>No active warehouses yet.</p> : null}
           </section>
 
           <section className="task-board" aria-labelledby="task-board-title">
             <div className="task-board__header">
               <div><span>{hasDateFilter ? dateRangeLabel(dateRange) : "Live Operations"}</span><h2 id="task-board-title">{hasDateFilter ? "Selected Range Tasks" : "Task Board"}</h2></div>
-              <button className="secondary-button" type="button" onClick={() => setActiveNav("Tasks")}>
-                View All Task <img src="/assets/icon-arrow-right.svg" alt="" />
+              <button className="secondary-button" type="button" onClick={() => openFilteredTasks()}>
+                View All Tasks <img src="/assets/icon-arrow-right.svg" alt="" />
               </button>
             </div>
             <TaskTable tasks={visibleTasks} onSelect={(task) => { setSelectedOrder(task); setIsOrderEditing(false); }} />
@@ -1911,13 +1932,10 @@ function Dashboard({
                 <input ref={taskFirstInputRef} name="invoice" placeholder="e.g. INV- 10458" required />
               </label>
 
-              <label className="form-field">
+              <div className="form-field">
                 <span>Schedule date</span>
-                <span className="input-with-icon">
-                  <input name="scheduled" type="date" defaultValue={activeDate ?? dateRange.from ?? todayInMelbourne()} required />
-                  <img src="/assets/icon-calendar.svg" alt="" />
-                </span>
-              </label>
+                <DateFilter mode="single" name="scheduled" value={{ from: newTaskDate, to: newTaskDate }} onChange={(range) => { if (range.from) setNewTaskDate(range.from); }} />
+              </div>
 
               <label className="form-field">
                 <span>Description</span>
@@ -2040,6 +2058,8 @@ function WarehouseTeamDashboard({
   const [activeView, setActiveView] = useState<TeamView>("My Tasks");
   const [activeSettings, setActiveSettings] = useState<SettingsSection | null>(null);
   const [scope, setScope] = useState<TeamScope>("My Tasks");
+  const [teamStatusFilter, setTeamStatusFilter] = useState("All status");
+  const [teamSearch, setTeamSearch] = useState("");
   const [openStatusInvoice, setOpenStatusInvoice] = useState<string | null>(null);
   const [pendingStatusChange, setPendingStatusChange] = useState<{ invoice: string; fromStatus: TeamTaskStatus; toStatus: TeamTaskStatus } | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Task | null>(null);
@@ -2084,16 +2104,22 @@ function WarehouseTeamDashboard({
   const companyTasks = tasks.filter((task) => !task.archivedAt);
   const assignedTasks = companyTasks.filter((task) => task.assigneeIds?.includes(account.id ?? ""));
   const scopeTasks = scope === "My Tasks" ? assignedTasks : companyTasks;
-  const visibleTasks = scopeTasks.filter((task) => isDateInRange(task.isoDate, dateRange));
+  const rangeTasks = scopeTasks.filter((task) => isDateInRange(task.isoDate, dateRange));
+  const today = todayInMelbourne();
+  const visibleTasks = rangeTasks.filter((task) => (teamStatusFilter === "All status" || task.status === teamStatusFilter)
+    && (!teamSearch.trim() || [task.invoice, task.description, task.location, task.assignee, task.summary].some((value) => value.toLowerCase().includes(teamSearch.trim().toLowerCase()))))
+    .sort((left, right) => compareTeamTasks(left, right, today));
+  const currentSelectedTask = tasks.find((task) => task.id === selectedOrder?.id);
+  const currentSelectedOrder = selectedOrder && currentSelectedTask ? { ...selectedOrder, status: currentSelectedTask.status, activityNotes: currentSelectedTask.activityNotes, assigneeIds: currentSelectedTask.assigneeIds, version: currentSelectedTask.version } : selectedOrder;
   const warehouseScopeTasks = scope === "My Tasks" ? assignedTasks : companyTasks;
   const dateFilteredWarehouseTasks = warehouseScopeTasks.filter((task) => isDateInRange(task.isoDate, dateRange));
   const liveWarehouses = warehousesWithLiveStats(dateFilteredWarehouseTasks, warehouses.filter((warehouse) => !warehouse.archivedAt));
   const visibleWarehouses = scope === "My Tasks" ? liveWarehouses.filter((warehouse) => account.warehouseIds?.includes(warehouse.id ?? "")) : liveWarehouses;
   const teamStats = [
-    { label: "Pending", value: padCount(visibleTasks.filter((task) => task.status === "Pending").length), note: dateRange.from || dateRange.to ? dateRangeLabel(dateRange) : `${scope === "My Tasks" ? "My tasks" : "All company tasks"}`, tone: "blue", icon: "clock" },
-    { label: "In Progress", value: padCount(visibleTasks.filter((task) => task.status === "In Progress").length), note: "Active operations", tone: "purple", icon: "clock" },
-    { label: "Complete", value: padCount(visibleTasks.filter((task) => task.status === "Complete").length), note: "Completed operations", tone: "green", icon: "complete" },
-    { label: "Delayed", value: padCount(visibleTasks.filter((task) => task.status === "Delayed").length), note: visibleTasks.some((task) => task.status === "Delayed") ? "Needs your attention" : "No delays in this view", tone: "red", icon: "danger" },
+    { label: "Pending", value: padCount(rangeTasks.filter((task) => task.status === "Pending").length), note: dateRange.from || dateRange.to ? dateRangeLabel(dateRange) : `${scope === "My Tasks" ? "My tasks" : "All company tasks"}`, tone: "blue", icon: "clock" },
+    { label: "In Progress", value: padCount(rangeTasks.filter((task) => task.status === "In Progress").length), note: "Active operations", tone: "purple", icon: "progress" },
+    { label: "Complete", value: padCount(rangeTasks.filter((task) => task.status === "Complete").length), note: "Completed operations", tone: "green", icon: "complete" },
+    { label: "Delayed", value: padCount(rangeTasks.filter((task) => task.status === "Delayed").length), note: rangeTasks.some((task) => task.status === "Delayed") ? "Needs your attention" : "No delays in this view", tone: "red", icon: "danger" },
   ];
 
   function openOrder(task: TeamTask) {
@@ -2110,7 +2136,7 @@ function WarehouseTeamDashboard({
       description: task.description,
       items: task.items,
       notes: task.notes,
-      priority: Boolean(task.priority),
+      priority: task.priority === "High",
       warehouseId: task.warehouseId,
       assigneeIds: task.assigneeIds,
       assignees: task.assignees,
@@ -2138,7 +2164,9 @@ function WarehouseTeamDashboard({
   return (
     <main className="dashboard-shell team-dashboard">
       <header className="topbar team-topbar">
-        <a className="brand" href="#team-overview" aria-label="Amazing Operations home" onClick={() => { setActiveSettings(null); setActiveView("My Tasks"); setScope("My Tasks"); }}>
+        {/* Full document navigation restores this account's default homepage. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a className="brand" href="/" aria-label="Amazing Operations home">
           <span className="brand__mark-wrap"><img className="brand__mark" src="/assets/logo-mark.svg" alt="" /></span>
           <img className="brand__word" src="/assets/logo-wordmark.svg" alt="Amazing Operations" />
         </a>
@@ -2229,11 +2257,10 @@ function WarehouseTeamDashboard({
           {activeView === "My Tasks" ? (
             <section className="stats-grid team-stats" aria-label="Filtered task summary">
               {teamStats.map((stat) => (
-                <article className="stat-card" key={stat.label}>
+                <button className="stat-card stat-card--interactive" type="button" key={stat.label} aria-pressed={teamStatusFilter === stat.label} aria-label={`Filter ${stat.label} tasks, ${stat.value}`} onClick={() => { setTeamStatusFilter((current) => current === stat.label ? "All status" : stat.label); setOpenStatusInvoice(null); }}>
                   <div className={`stat-label stat-label--${stat.tone}`}><LayeredIcon kind={stat.icon} /> {stat.label}</div>
                   <strong>{stat.value}</strong>
-                  <span className={`stat-note stat-note--${stat.tone}`}>{stat.note}</span>
-                </article>
+                </button>
               ))}
             </section>
           ) : null}
@@ -2248,10 +2275,14 @@ function WarehouseTeamDashboard({
                   aria-pressed={scope === option}
                   onClick={() => setScope(option)}
                 >
-                  {option}
+                  {activeView === "Warehouses Network" ? option === "My Tasks" ? "My warehouses" : "All warehouses" : option === "My Tasks" ? "Assigned to me" : option}
                 </button>
               ))}
             </div>
+            {activeView === "My Tasks" ? <div className="team-list-filters">
+              <input type="search" aria-label="Search team tasks" placeholder="Search invoice or task" value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} />
+              <select aria-label="Team task status" value={teamStatusFilter} onChange={(event) => setTeamStatusFilter(event.target.value)}><option>All status</option><option>Pending</option><option>In Progress</option><option>Complete</option><option>Delayed</option></select>
+            </div> : null}
           </section>
 
           {activeView === "Warehouses Network" ? (
@@ -2287,7 +2318,7 @@ function WarehouseTeamDashboard({
             <section className="team-task-list" aria-labelledby="team-task-list-title">
               <div className="team-task-list__heading">
                 <span aria-hidden="true" />
-                <h2 id="team-task-list-title">{dateRange.from || dateRange.to ? dateRangeLabel(dateRange) : "All dates"}</h2>
+                <h2 id="team-task-list-title">{teamStatusFilter === "All status" ? "Work queue" : `${teamStatusFilter} tasks`}</h2>
                 <small aria-live="polite">{visibleTasks.length} {visibleTasks.length === 1 ? "Task" : "Tasks"}</small>
                 <span aria-hidden="true" />
               </div>
@@ -2298,14 +2329,14 @@ function WarehouseTeamDashboard({
                     <button className="team-task-card__open" type="button" onClick={() => openOrder(task)} aria-label={`Open ${task.invoice} order details`}>
                       <span className="team-task-card__icon"><img src="/assets/icon-tasks.svg" alt="" /></span>
                       <span className="team-task-card__copy">
-                        <span className="team-task-card__invoice">{task.invoice}</span>
+                        <span className="team-task-card__invoice">{task.invoice} · {task.type}</span>
                         <strong>{task.title}</strong>
                         <span className="team-task-card__summary">{task.summary}</span>
                         <span className="team-task-card__meta">
                           <span><img src="/assets/icon-calendar.svg" alt="" />{task.date}</span>
                           <span><img src="/assets/icon-clock.svg" alt="" />{task.time}</span>
                           <span><img src="/assets/icon-location.svg" alt="" />{task.location}</span>
-                          {task.priority ? <span className="team-priority">{task.priority} priority</span> : null}
+                          {task.status !== "Complete" && taskUrgency(task, today) !== "Upcoming" ? <span className="team-priority">{taskUrgency(task, today)}</span> : null}
                         </span>
                       </span>
                     </button>
@@ -2343,7 +2374,7 @@ function WarehouseTeamDashboard({
                     </div> : <span className={`team-status-button team-status-button--${task.status.toLowerCase().replace(" ", "-")} team-status-button--readonly`} aria-label={`${task.status}, read only`}>{task.status}</span>}
                   </article>
                 ))}
-                {!visibleTasks.length ? <div className="team-empty-state"><strong>No tasks in this range</strong><p>Choose another range or select All Dates to see the full task list.</p><button type="button" onClick={() => setDateRange({ from: null, to: null })}>Show all dates</button></div> : null}
+                {!visibleTasks.length ? <div className="team-empty-state"><strong>No matching tasks</strong><p>Try another status, search or date range.</p><button type="button" onClick={() => { setDateRange({ from: null, to: null }); setTeamStatusFilter("All status"); setTeamSearch(""); }}>Clear filters</button></div> : null}
               </div>
             </section>
           )}
@@ -2352,12 +2383,13 @@ function WarehouseTeamDashboard({
 
       {selectedOrder ? (
         <OrderDetailsDrawer
-          order={selectedOrder}
+          order={currentSelectedOrder ?? selectedOrder}
           isEditing={isOrderEditing}
           onEditingChange={setIsOrderEditing}
           onSave={() => undefined}
           readOnlyDetails
-          canAddNote={Boolean(selectedOrder.assigneeIds?.includes(account.id ?? ""))}
+          canAddNote={Boolean(currentSelectedTask && !currentSelectedTask.archivedAt && currentSelectedTask.assigneeIds?.includes(account.id ?? ""))}
+          onStatusChange={currentSelectedTask && !currentSelectedTask.archivedAt && currentSelectedTask.assigneeIds?.includes(account.id ?? "") ? (status) => requestTaskStatusChange(currentSelectedTask, status) : undefined}
           onAddNote={(note) => onTasksChange((current) => current.map((task) => task.id === selectedOrder.id ? { ...task, notes: note } : task))}
           onClose={() => { setSelectedOrder(null); setIsOrderEditing(false); }}
         />
@@ -2549,6 +2581,14 @@ export default function Home() {
   }, [reload]);
 
   const realtimeAccountId = snapshot?.account.id;
+  useEffect(() => {
+    if (!realtimeAccountId) return;
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void reload(); };
+    const timer = window.setInterval(refreshWhenVisible, 60000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refreshWhenVisible); };
+  }, [reload, realtimeAccountId]);
+
   useEffect(() => {
     const accountId = realtimeAccountId;
     if (!accountId) return;

@@ -60,11 +60,24 @@ export async function updatePasswordAction(passwordValue: unknown): Promise<Acti
 export async function changePasswordAction(input: unknown): Promise<ActionResult> {
   const parsed = z.object({ email: z.email(), currentPassword: z.string().min(1), newPassword: z.string().min(10, "Use at least 10 characters.").max(1024) }).safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the password fields.", code: "INVALID_INPUT" };
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { ok: false, error: "Operations authentication has not been configured yet.", code: "NOT_CONFIGURED" };
-  const { error: signInError } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.currentPassword });
+  const context = await getAuthenticatedContext();
+  if (!context.ok) return context;
+  const { supabase, profile } = context.data;
+  const { error: signInError } = await supabase.auth.signInWithPassword({ email: profile.email, password: parsed.data.currentPassword });
   if (signInError) return { ok: false, error: "The current password is incorrect.", code: signInError.code };
   const { error } = await supabase.auth.updateUser({ password: parsed.data.newPassword });
   if (error) return { ok: false, error: error.message, code: error.code };
+  return { ok: true, data: undefined };
+}
+
+export async function requestOwnPasswordResetAction(): Promise<ActionResult> {
+  const context = await getAuthenticatedContext();
+  if (!context.ok) return context;
+  const requestHeaders = await headers();
+  const origin = process.env.NEXT_PUBLIC_APP_URL ?? requestHeaders.get("origin") ?? "https://amazing-operations-dashboard.vercel.app";
+  const { error } = await context.data.supabase.auth.resetPasswordForEmail(context.data.profile.email, {
+    redirectTo: `${origin}/auth/callback?next=/auth/update-password`,
+  });
+  if (error) return { ok: false, error: error.status === 429 ? "Please wait a minute before requesting another reset email." : "The reset email could not be sent. Please try again or contact your manager.", code: error.code };
   return { ok: true, data: undefined };
 }
