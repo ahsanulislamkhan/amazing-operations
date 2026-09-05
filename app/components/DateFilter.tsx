@@ -55,17 +55,31 @@ function displayDate(value: string | null) {
 }
 
 function labelForRange(range: DateRange) {
-  if (!range.from && !range.to) return { number: "All", top: "All dates", bottom: "No date limit" };
-  const format = (value: string) => displayDate(value);
+  if (!range.from && !range.to) return { top: "All dates", bottom: "No date limit" };
+  const shortDate = (value: string) => new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(dateFromIso(value));
   if (range.from === range.to && range.from) {
-    const date = dateFromIso(range.from);
     return {
-      number: new Intl.DateTimeFormat("en-AU", { day: "numeric", timeZone: "UTC" }).format(date),
-      top: new Intl.DateTimeFormat("en-AU", { weekday: "short", timeZone: "UTC" }).format(date),
-      bottom: new Intl.DateTimeFormat("en-AU", { month: "long", year: "numeric", timeZone: "UTC" }).format(date),
+      top: displayDate(range.from),
+      bottom: "Single day",
     };
   }
-  return { number: "Range", top: range.from ? format(range.from) : "Any start", bottom: range.to ? format(range.to) : "Any end" };
+  if (range.from && range.to) {
+    const start = dateFromIso(range.from);
+    const end = dateFromIso(range.to);
+    const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    const startYear = start.getUTCFullYear();
+    const endYear = end.getUTCFullYear();
+    return {
+      top: `${shortDate(range.from)} – ${shortDate(range.to)}`,
+      bottom: `${startYear === endYear ? startYear : `${startYear}–${endYear}`} · ${days} ${days === 1 ? "day" : "days"}`,
+    };
+  }
+  if (range.from) return { top: `${shortDate(range.from)} onwards`, bottom: "Choose an end date" };
+  return { top: `Until ${shortDate(range.to!)}`, bottom: "Choose a start date" };
 }
 
 function calendarWeeks(month: Date) {
@@ -104,10 +118,17 @@ export default function DateFilter({ value, onChange, mode = "range", name }: Da
     const margin = 12;
     const availableBelow = Math.max(240, window.innerHeight - rect.bottom - margin * 2);
     const availableAbove = Math.max(240, rect.top - margin * 2);
-    const openAbove = availableBelow < 500 && availableAbove > availableBelow;
-    setPopoverStyle(openAbove
-      ? { position: "fixed", top: "auto", right: Math.max(margin, window.innerWidth - rect.right), bottom: window.innerHeight - rect.top + margin, maxHeight: Math.min(590, availableAbove) }
-      : { position: "fixed", top: rect.bottom + margin, right: Math.max(margin, window.innerWidth - rect.right), bottom: "auto", maxHeight: Math.min(590, availableBelow) });
+    const preferredHeight = 610;
+    const right = Math.max(margin, window.innerWidth - rect.right);
+    if (availableBelow >= preferredHeight) {
+      setPopoverStyle({ position: "fixed", top: rect.bottom + margin, right, bottom: "auto", maxHeight: Math.min(640, availableBelow), transform: "none" });
+      return;
+    }
+    if (availableAbove >= preferredHeight) {
+      setPopoverStyle({ position: "fixed", top: "auto", right, bottom: window.innerHeight - rect.top + margin, maxHeight: Math.min(640, availableAbove), transform: "none" });
+      return;
+    }
+    setPopoverStyle({ position: "fixed", top: "50%", right, bottom: "auto", maxHeight: "calc(100dvh - 24px)", transform: "translateY(-50%)" });
   }, []);
 
   useEffect(() => {
@@ -218,7 +239,7 @@ export default function DateFilter({ value, onChange, mode = "range", name }: Da
       {name ? <input type="hidden" name={name} value={value.from ?? ""} /> : null}
       <button ref={triggerRef} className="date-filter__trigger" type="button" aria-label={mode === "single" ? `Schedule date: ${displayDate(value.from)}` : undefined} aria-haspopup="dialog" aria-expanded={open} onClick={() => open ? setOpen(false) : openCalendar()}>
         {mode === "single" ? <><span>{displayDate(value.from)}</span><img className="schedule-calendar-icon" src="/assets/icon-calendar.svg" alt="" /></> : <>
-        <span className={`date-filter__number${value.from ? "" : " date-filter__number--all"}`}>{label.number}</span>
+        <span className="date-filter__number" aria-hidden="true"><img src="/assets/icon-calendar-bold.svg" alt="" /></span>
         <span className="date-filter__copy"><span>{label.top}</span><span className="date-filter__month-year">{label.bottom}</span></span>
         <span className={`date-filter__trigger-chevron${open ? " date-filter__trigger-chevron--open" : ""}`} aria-hidden="true"><img src="/assets/icon-dropdown-path.svg" alt="" /></span>
         </>}
@@ -252,7 +273,13 @@ export default function DateFilter({ value, onChange, mode = "range", name }: Da
               </div>
             </div>
             {error ? <p className="date-filter__error" role="alert">{error}</p> : null}
-            <div className="date-filter__quick-actions"><button type="button" onClick={chooseToday}>Today</button>{mode === "range" ? <button type="button" onClick={chooseAll}>All Dates</button> : null}</div>
+            <div className="date-filter__quick-actions">
+              <span className="date-filter__quick-label">Quick actions</span>
+              <div>
+                <button type="button" onClick={chooseToday}><img src="/assets/icon-calendar-bold.svg" alt="" />Today</button>
+                {mode === "range" ? <button type="button" onClick={chooseAll}>All dates</button> : null}
+              </div>
+            </div>
           </div>
           <div className="date-filter__actions"><button className="date-filter__action date-filter__action--secondary" type="button" onClick={() => { setDraft(value); setError(""); setOpen(false); triggerRef.current?.focus(); }}>Cancel</button><button className="date-filter__action date-filter__action--primary" type="button" onClick={apply}>Done</button></div>
         </section>

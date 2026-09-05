@@ -46,3 +46,25 @@ test('operational emails stay paused and nested dialogs ignore inert backgrounds
   assert.match(page,/container\.closest\("\[inert\]"\)/);
   assert.match(page,/Assigned to me/); assert.match(page,/Read-only company task/);
 });
+test('dashboard and audit filters use consistent rounded controls', async () => {
+  const [css, page, audit] = await Promise.all([
+    readFile(new URL('../app/components/assessment-updates.css', import.meta.url), 'utf8'),
+    readFile(new URL('../app/page.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../app/components/AuditHistory.tsx', import.meta.url), 'utf8'),
+  ]);
+  assert.doesNotMatch(page, /<select/);
+  assert.doesNotMatch(audit, /<select/);
+  assert.match(css, /\.overview-warehouse-filter \.task-filter-select__trigger \{[^}]*height: 64px/);
+  assert.match(css, /\.audit-filters \.date-filter__trigger \{[^}]*height: 48px/);
+  assert.match(css, /\.audit-toolbar \.secondary-button \{ width: auto; max-width: 100%;/);
+  assert.match(css, /@media \(max-width: 520px\) \{\s*\.audit-filters \{ grid-template-columns: minmax\(0, 1fr\)/);
+});
+test('In Progress uses a dedicated purple icon instead of the Pending clock', async () => {
+  const [page, icon] = await Promise.all([
+    readFile(new URL('../app/page.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../public/assets/icon-stat-progress.svg', import.meta.url), 'utf8'),
+  ]);
+  assert.match(page, /progress: "\/assets\/icon-stat-progress\.svg"/);
+  assert.match(icon, /viewBox="0 0 24 24"/);
+  assert.match(icon, /stroke="#7C3AED"/);
+});

@@ -59,6 +59,14 @@ export type TaskNoteDTO = {
 
 export type TaskAssigneeDTO = Pick<StaffDTO, "id" | "fullName">;
 
+export type TaskAttachmentDTO = {
+  id: string;
+  fileName: string;
+  mimeType: "application/pdf";
+  fileSize: number;
+  url: string | null;
+};
+
 export type TaskDTO = {
   id: string;
   invoice: string;
@@ -72,6 +80,7 @@ export type TaskDTO = {
   priority: boolean;
   items: TaskItemDTO[];
   notes: TaskNoteDTO[];
+  attachments: TaskAttachmentDTO[];
   version: number;
   archivedAt: string | null;
 };

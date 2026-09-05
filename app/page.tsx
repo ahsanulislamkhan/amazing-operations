@@ -1,11 +1,14 @@
 "use client";
 
-import { Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DateFilter from "./components/DateFilter";
 import MultiAssigneeSelect from "./components/MultiAssigneeSelect";
+import TaskFilterSelect from "./components/TaskFilterSelect";
+import PriorityPicker from "./components/PriorityPicker";
 import AuditHistory from "./components/AuditHistory";
 import "./components/assessment-updates.css";
+import "./components/order-editor.css";
 import type { ActionResult, AuditEventDTO, DateRange, NotificationPreferencesDTO, OperationsSnapshot, StaffStatus, TaskDTO } from "@/lib/operations/types";
 import { compareTeamTasks, taskUrgency } from "@/lib/operations/task-order";
 import { canTeamTransition } from "@/lib/operations/types";
@@ -17,6 +20,7 @@ import {
   inviteStaffAction,
   loadOperationsAction,
   markNotificationsReadAction,
+  registerTaskAttachmentAction,
   saveNotificationPreferencesAction,
   saveStaffAction,
   sendStaffPasswordResetAction,
@@ -45,6 +49,15 @@ type TaskItem = {
   id: string;
   name: string;
   quantity: string;
+};
+
+type TaskAttachment = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  url?: string;
+  file?: File;
 };
 
 type Administrator = {
@@ -86,6 +99,7 @@ type Task = {
   version?: number;
   archivedAt?: string | null;
   activityNotes?: Array<{ id: string; body: string; authorName: string; createdAt: string }>;
+  attachments?: TaskAttachment[];
 };
 
 type TeamTaskStatus = Status;
@@ -115,6 +129,7 @@ type TeamTask = {
   version?: number;
   archivedAt?: string | null;
   activityNotes?: Array<{ id: string; body: string; authorName: string; createdAt: string }>;
+  attachments?: TaskAttachment[];
 };
 
 type NotificationSettings = typeof defaultNotificationSettings;
@@ -227,6 +242,72 @@ function formatCompactDate(isoDate: string) {
   return `${String(date.getDate()).padStart(2, "0")} ${months[date.getMonth()]}`;
 }
 
+const ORDER_ATTACHMENT_PREFIX = "ORDER_ATTACHMENT_V1:";
+const MAX_TASK_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const decimals = unit === 0 ? 0 : value < 10 ? 1 : 0;
+  return `${value.toFixed(decimals)} ${units[unit]}`;
+}
+
+function parseAttachmentMarkerLine(line: string): Omit<TaskAttachment, "url"> | null {
+  if (!line.startsWith(ORDER_ATTACHMENT_PREFIX)) return null;
+  const payload = line.slice(ORDER_ATTACHMENT_PREFIX.length).trim();
+  if (!payload) return null;
+  try {
+    const value = JSON.parse(payload);
+    if (
+      typeof value !== "object"
+      || value === null
+      || typeof value.id !== "string"
+      || !value.id.trim()
+      || typeof value.name !== "string"
+      || !value.name.trim()
+      || typeof value.type !== "string"
+      || typeof value.size !== "number"
+      || !Number.isFinite(value.size)
+    ) {
+      return null;
+    }
+    return {
+      id: value.id,
+      name: value.name,
+      type: value.type,
+      size: Math.max(0, Math.round(value.size)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseTaskNotes(
+  notes: Array<{ id: string; body: string; authorId: string; authorName: string; createdAt: string; }> = [],
+) {
+  const attachments: Omit<TaskAttachment, "url">[] = [];
+  const activityNotes = notes.flatMap((note) => {
+    const lines = note.body.split(/\r?\n/);
+    const filtered = lines.filter((line) => {
+      const parsed = parseAttachmentMarkerLine(line.trim());
+      if (parsed) {
+        attachments.push(parsed);
+        return false;
+      }
+      return true;
+    }).map((line) => line.trim()).filter(Boolean);
+    if (!filtered.length) return [];
+    return [{ ...note, body: filtered.join("\n") }];
+  });
+  return { attachments, activityNotes };
+}
+
 function padCount(value: number) {
   return String(value).padStart(2, "0");
 }
@@ -255,6 +336,7 @@ function taskToTeamTask(task: Task, existing?: TeamTask): TeamTask {
     notes: task.notes,
     type: task.type,
     assignee: task.assignee,
+    attachments: task.attachments,
   };
 }
 
@@ -446,7 +528,7 @@ function LayeredIcon({ kind }: { kind: string }) {
     dashboard: "/assets/icon-dashboard.svg",
     tasks: "/assets/icon-tasks.svg",
     clock: "/assets/icon-stat-clock.svg",
-    progress: "/assets/icon-clock.svg",
+    progress: "/assets/icon-stat-progress.svg",
     danger: "/assets/icon-stat-danger.svg",
     box: "/assets/icon-stat-box.svg",
   };
@@ -766,7 +848,7 @@ function OrderDetailsDrawer({
   order: Task;
   isEditing: boolean;
   onEditingChange: (editing: boolean) => void;
-  onSave: (order: Task) => void;
+  onSave: (order: Task) => void | Promise<string | null>;
   onDelete?: (order: Task) => void;
   archiveActionLabel?: string;
   statusLabels?: Partial<Record<Status, string>>;
@@ -780,6 +862,7 @@ function OrderDetailsDrawer({
 }) {
   const [draft, setDraft] = useState(order);
   const [orderError, setOrderError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const [newNote, setNewNote] = useState("");
   const closeRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -791,7 +874,8 @@ function OrderDetailsDrawer({
     onEditingChange(false);
   }
 
-  function saveChanges() {
+  async function saveChanges() {
+    if (isSaving) return;
     const scheduleDate = draft.date;
     if (!isOperationalDate(scheduleDate)) {
       setOrderError("Choose a valid schedule date.");
@@ -806,8 +890,16 @@ function OrderDetailsDrawer({
       items: cleanItems,
     };
     setOrderError("");
-    onSave(updated);
-    onEditingChange(false);
+    setIsSaving(true);
+    try {
+      const error = await onSave(updated);
+      if (error) { setOrderError(error); return; }
+      onEditingChange(false);
+    } catch {
+      setOrderError("The changes could not be saved. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function deleteTask() {
@@ -841,59 +933,75 @@ function OrderDetailsDrawer({
           </div>
 
           <div className={`order-details ${isEditing ? "order-details--editing" : ""}`}>
-            <div className="order-detail-row"><span>Invoice No.</span><strong>{order.invoice}</strong></div>
-            <div className="order-detail-row">
-              <span>Schedule date</span>
-              {isEditing ? <DateFilter mode="single" value={{ from: draft.date, to: draft.date }} onChange={(range) => { if (range.from) { setOrderError(""); setDraft({ ...draft, date: range.from }); } }} /> : <strong>{order.scheduled}</strong>}
+            <div className="order-summary-card">
+              <div><span>Invoice</span><strong>{order.invoice}</strong><small>{order.scheduled}</small></div>
+              <span className={`status status--${statusClass(isEditing ? draft.status : order.status)}`}>{statusLabels?.[isEditing ? draft.status : order.status] ?? (isEditing ? draft.status : order.status)}</span>
             </div>
-            <label className="order-detail-row">
-              <span>Type</span>
-              {isEditing ? (
-                <select value={draft.type} aria-label="Task type" onChange={(event) => setDraft({ ...draft, type: event.target.value as Task["type"] })}>
-                  <option>Delivery</option><option>Pickup</option><option>Container</option>
-                </select>
-              ) : <strong>{order.type}</strong>}
-            </label>
-            <label className="order-detail-row">
-              <span>Warehouse</span>
-              {isEditing ? <select value={draft.warehouseId} aria-label="Warehouse" onChange={(event) => { const selected = warehouseOptions.find((warehouse) => warehouse.id === event.target.value); setDraft({ ...draft, warehouseId: event.target.value, warehouse: selected?.name ?? draft.warehouse, assigneeIds: [], assignees: [], assignee: "" }); }}>{warehouseOptions.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select> : <strong>{order.warehouse}</strong>}
-            </label>
-            <label className="order-detail-row">
-              <span>Assigned to</span>
-              {isEditing ? <select multiple value={draft.assigneeIds ?? []} aria-label="Assigned to" onChange={(event) => { const ids = Array.from(event.currentTarget.selectedOptions).map((option) => option.value); const selected = staffOptions.filter((staff) => ids.includes(staff.id)); setDraft({ ...draft, assigneeIds: ids, assignees: selected.map((staff) => staff.name), assignee: selected.map((staff) => staff.name).join(", "), avatar: selected[0]?.avatar ?? draft.avatar }); }}>{staffOptions.filter((staff) => staff.role === "Team member" && staff.status === "Verified" && staff.warehouseIds?.includes(draft.warehouseId ?? "")).map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select> : <strong>{order.assignee}</strong>}
-            </label>
-            <label className="order-detail-row">
-              <span>Status</span>
-              {isEditing ? (
-                <select value={draft.status} aria-label="Status" onChange={(event) => setDraft({ ...draft, status: event.target.value as Status })}>
-                  {(["Pending", "In Progress", "Complete", "Delayed"] as Status[]).map((status) => <option value={status} key={status}>{statusLabels?.[status] ?? status}</option>)}
-                </select>
-              ) : onStatusChange ? <select aria-label="Update task status" value={order.status} onChange={(event) => onStatusChange(event.target.value as Status)}>{(["Pending", "In Progress", "Complete", "Delayed"] as Status[]).filter((status) => canTeamTransition(statusToDto(order.status), statusToDto(status))).map((status) => <option key={status}>{status}</option>)}</select> : <strong><span className={`status status--${statusClass(order.status)}`}>{statusLabels?.[order.status] ?? order.status}</span></strong>}
-            </label>
 
-            <div className="order-description">
-              <div className="order-section-title"><span>Description</span></div>
+            <section className="order-info-card" aria-labelledby="order-task-information">
+              <div className="order-section-title"><span id="order-task-information">Task information</span></div>
+              <div className="order-info-card__rows">
+                <div className="order-detail-row">
+                  <span>Schedule date</span>
+                  {isEditing ? <DateFilter mode="single" value={{ from: draft.date, to: draft.date }} onChange={(range) => { if (range.from) { setOrderError(""); setDraft({ ...draft, date: range.from }); } }} /> : <strong>{order.scheduled}</strong>}
+                </div>
+                <div className="order-detail-row">
+                  <span>Type</span>
+                  {isEditing ? (
+                    <TaskFilterSelect label="Task type" value={draft.type} options={["Delivery", "Pickup", "Container"]} onChange={(next) => setDraft({ ...draft, type: next as Task["type"] })} />
+                  ) : <strong>{order.type}</strong>}
+                </div>
+                <div className="order-detail-row">
+                  <span>Warehouse</span>
+                  {isEditing ? <TaskFilterSelect label="Warehouse" value={draft.warehouseId} options={warehouseOptions.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => ({ value: warehouse.id ?? "", label: warehouse.name }))} onChange={(next) => { const selected = warehouseOptions.find((warehouse) => warehouse.id === next); setDraft({ ...draft, warehouseId: next, warehouse: selected?.name ?? draft.warehouse, assigneeIds: [], assignees: [], assignee: "" }); }} /> : <strong>{order.warehouse}</strong>}
+                </div>
+                <div className="order-detail-row">
+                  <span>Assigned to</span>
+                  {isEditing ? <MultiAssigneeSelect options={staffOptions.filter((staff) => staff.role === "Team member" && staff.status === "Verified" && staff.warehouseIds?.includes(draft.warehouseId ?? "")).map((staff) => ({ id: staff.id, name: staff.name }))} selectedIds={draft.assigneeIds ?? []} onChange={(ids) => { const selected = staffOptions.filter((staff) => ids.includes(staff.id)); setDraft({ ...draft, assigneeIds: ids, assignees: selected.map((staff) => staff.name), assignee: selected.map((staff) => staff.name).join(", "), avatar: selected[0]?.avatar ?? draft.avatar }); }} /> : <strong>{order.assignee}</strong>}
+                </div>
+                <div className="order-detail-row">
+                  <span>Status</span>
+                  {isEditing ? (
+                    <TaskFilterSelect label="Status" value={draft.status} onChange={(next) => setDraft({ ...draft, status: next as Status })} options={(["Pending", "In Progress", "Complete", "Delayed"] as Status[]).map((status) => ({ value: status, label: statusLabels?.[status] ?? status }))} />
+                  ) : onStatusChange ? <TaskFilterSelect label="Update task status" value={order.status} onChange={(next) => onStatusChange(next as Status)} options={(["Pending", "In Progress", "Complete", "Delayed"] as Status[]).filter((status) => canTeamTransition(statusToDto(order.status), statusToDto(status)))} /> : <strong>{order.status}</strong>}
+                </div>
+                <div className="order-detail-row">
+                  <span>Priority</span>
+                  {isEditing ? (
+                    <PriorityPicker value={draft.priority} onChange={(priority) => setDraft({ ...draft, priority })} />
+                  ) : <strong>{order.priority ? "High priority" : "Normal"}</strong>}
+                </div>
+              </div>
+            </section>
+
+            <div className="order-description order-content-card">
+              <div className="order-section-title"><span>Notes</span></div>
               {isEditing ? (
-                <textarea aria-label="Description" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+                <textarea aria-label="Notes" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
               ) : (
                 <p>{order.description}</p>
               )}
             </div>
 
-            <div className="order-items">
-              <div className="order-items__heading"><h3>Items &amp; Quantity</h3>{isEditing ? <button type="button" onClick={() => setDraft({ ...draft, items: [...draft.items, { id: `${draft.invoice}-${Date.now()}`, name: "", quantity: "" }] })}>+ Add item</button> : null}</div>
-              <div className="order-items__table" role="table" aria-label="Items and quantities">
-                <div className="order-items__row order-items__row--header" role="row"><span role="columnheader">Name</span><span role="columnheader">Quantity</span></div>
-                {(isEditing ? draft.items : order.items).map((item, index) => (
-                  <div className="order-items__row" role="row" key={item.id}>
-                    <span role="cell">{isEditing ? <input value={item.name} aria-label={`Item ${index + 1} name`} onChange={(event) => setDraft({ ...draft, items: draft.items.map((current) => current.id === item.id ? { ...current, name: event.target.value } : current) })} /> : item.name}</span>
-                    <span role="cell">{isEditing ? <span className="order-quantity-edit"><input value={item.quantity} aria-label={`Item ${index + 1} quantity`} onChange={(event) => setDraft({ ...draft, items: draft.items.map((current) => current.id === item.id ? { ...current, quantity: event.target.value } : current) })} /><button type="button" aria-label={`Remove ${item.name || `item ${index + 1}`}`} onClick={() => setDraft({ ...draft, items: draft.items.filter((current) => current.id !== item.id) })}>×</button></span> : item.quantity}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="order-attachments order-content-card">
+              <div className="order-section-title"><span>Invoice PDF</span></div>
+              {order.attachments?.length ? order.attachments.map((attachment) => <article className="order-attachment" key={attachment.id}>
+                <div className="order-attachment__file">
+                  <span className="order-attachment__badge" aria-hidden="true">PDF</span>
+                  <span><strong>{attachment.name}</strong><small>{formatBytes(attachment.size)}</small></span>
+                  {attachment.url ? <a href={attachment.url} target="_blank" rel="noreferrer">Open PDF</a> : <span className="order-attachment__unavailable">Link unavailable</span>}
+                </div>
+                {attachment.url ? <details className="order-attachment__preview" open>
+                  <summary>View PDF in task</summary>
+                  <iframe src={`${attachment.url}#toolbar=0&navpanes=0`} title={`Preview ${attachment.name}`} />
+                </details> : null}
+              </article>) : <div className="order-attachment order-attachment--empty">
+                <span className="order-attachment__badge" aria-hidden="true">PDF</span>
+                <span><strong>No PDF uploaded</strong><small>This task was created without an invoice document.</small></span>
+              </div>}
             </div>
 
-            <div className="order-description order-activity">
+            <div className="order-description order-activity order-content-card">
               <div className="order-section-title"><span>Activity</span></div>
               {order.activityNotes?.length ? <ol className="order-activity__feed">{order.activityNotes.map((note) => <li key={note.id}><p>{note.body}</p><small>{note.authorName} · {new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Melbourne", dateStyle: "medium", timeStyle: "short" }).format(new Date(note.createdAt))}</small></li>)}</ol> : <p>No activity notes yet.</p>}
               {isEditing ? <textarea aria-label="Add activity note" placeholder="Add a new activity note (optional)" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /> : null}
@@ -905,9 +1013,9 @@ function OrderDetailsDrawer({
         {orderError ? <p className="settings-message settings-message--error order-panel__error" role="alert">{orderError}</p> : null}
         {isEditing ? (
           <div className="order-panel__actions">
-            {onDelete ? <button className="order-delete-button" type="button" onClick={deleteTask}>{archiveActionLabel}</button> : null}
-            <button type="button" onClick={cancelEditing}>Cancel</button>
-            <button type="button" onClick={saveChanges}>Save change</button>
+            {onDelete ? <button className="order-delete-button" type="button" onClick={deleteTask} disabled={isSaving}>{archiveActionLabel}</button> : null}
+            <button type="button" onClick={cancelEditing} disabled={isSaving}>Cancel</button>
+            <button type="button" onClick={saveChanges} disabled={isSaving}>{isSaving ? "Saving…" : "Save change"}</button>
           </div>
         ) : null}
       </aside>
@@ -966,18 +1074,18 @@ function LoginScreen({ onSignIn, initialError = "" }: { onSignIn: (email: string
                 <h1 id="login-title">Sign in to Operations</h1>
               </div>
               <div className="login-header__rule" aria-hidden="true"><span /></div>
-              <p>Use your work email and password to continue.</p>
+              <p>Use your email and password to continue.</p>
             </div>
 
             <div className="login-fields">
               <label className="login-field">
-                <span>Work E-mail</span>
-                <input name="email" type="email" placeholder="*********" autoComplete="email" required />
+                <span>Email</span>
+                <input name="email" type="email" placeholder="Enter email" autoComplete="email" required />
               </label>
               <label className="login-field">
                 <span>Password</span>
                 <span className="password-field">
-                  <input name="password" type={showPassword ? "text" : "password"} placeholder="*********" autoComplete="current-password" required />
+                  <input name="password" type={showPassword ? "text" : "password"} placeholder="Enter password" autoComplete="current-password" required />
                   <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"}>
                     <img src="/assets/icon-login-eye.svg" alt="" />
                   </button>
@@ -1291,12 +1399,7 @@ function SettingsPage({
                   <p>Manage your roles and permissions effortlessly.</p>
                 </div>
                 <div className="role-management-controls">
-                  <label>
-                    <span className="sr-only">Filter administration status</span>
-                    <select value={roleStatusFilter} onChange={(event) => setRoleStatusFilter(event.target.value)}>
-                      <option>All status</option><option>Verified</option><option>Pending</option><option>Suspended</option><option>Archived</option>
-                    </select>
-                  </label>
+                  <TaskFilterSelect label="Filter administration status" value={roleStatusFilter} onChange={setRoleStatusFilter} options={["All status", "Verified", "Pending", "Suspended", "Archived"]} />
                   <button className="settings-add-button" type="button" onClick={() => openAdministratorModal()}><img src="/assets/icon-add.svg" alt="" /> Add new</button>
                 </div>
               </div>
@@ -1445,7 +1548,7 @@ function SettingsPage({
               <h3>Staff Information</h3>
               <div className="administration-fields">
                 <label><span>Staff Name</span><input ref={administrationFirstInputRef} name="name" defaultValue={editingAdministrator?.name} placeholder="Rumin Rafi" required /></label>
-                <label><span>Role</span><select name="role" defaultValue={editingAdministrator?.role ?? "Manager"}><option>Manager</option><option>Team member</option></select></label>
+                <label><span>Role</span><TaskFilterSelect label="Role" name="role" defaultValue={editingAdministrator?.role ?? "Manager"} options={["Manager", "Team member"]} /></label>
                 <label>
                   <span>E-mail Address</span>
                   <input
@@ -1459,9 +1562,9 @@ function SettingsPage({
                   />
                   {editingAdministrator?.authUserId ? <small className="administration-field-help" id="linked-email-help">Login email is locked after the account is linked.</small> : null}
                 </label>
-                <label><span>Gender</span><select name="gender" defaultValue={editingAdministrator?.gender ?? "Prefer not to say"}><option>Male</option><option>Female</option><option>Prefer not to say</option></select></label>
+                <label><span>Gender</span><TaskFilterSelect label="Gender" name="gender" defaultValue={editingAdministrator?.gender ?? "Prefer not to say"} options={["Male", "Female", "Prefer not to say"]} /></label>
                 <label><span>Date of Birth</span><input name="dateOfBirth" type="date" defaultValue={editingAdministrator?.dateOfBirth} /></label>
-                <label><span>Location</span><select name="location" defaultValue={editingAdministrator?.location ?? "Melbourne, Australia"}><option>Melbourne, Australia</option><option>Sunshine, Australia</option><option>Geelong, Australia</option></select></label>
+                <label><span>Location</span><TaskFilterSelect label="Location" name="location" defaultValue={editingAdministrator?.location ?? "Melbourne, Australia"} options={["Melbourne, Australia", "Sunshine, Australia", "Geelong, Australia"]} /></label>
                 <fieldset className="administration-warehouses"><legend>Warehouse access</legend>{warehouses.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => <label key={warehouse.id}><input type="checkbox" name="warehouseIds" value={warehouse.id} defaultChecked={editingAdministrator?.warehouseIds?.includes(warehouse.id ?? "")} /><span>{warehouse.name}</span></label>)}</fieldset>
               </div>
               {administratorError ? <p className="settings-message settings-message--error" role="alert">{administratorError}</p> : null}
@@ -1519,12 +1622,13 @@ function Dashboard({
   const [activeNav, setActiveNav] = useState("Dashboard");
   const [activeSettings, setActiveSettings] = useState<SettingsSection | null>(null);
   const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
-  const [newTaskType, setNewTaskType] = useState<Task["type"]>("Pickup");
+  const [isTaskSubmitting, setIsTaskSubmitting] = useState(false);
   const [isPriority, setIsPriority] = useState(false);
   const [newTaskDate, setNewTaskDate] = useState(todayInMelbourne());
-  const [overviewWarehouse, setOverviewWarehouse] = useState("All warehouse");
+  const [newTaskType, setNewTaskType] = useState<"Delivery" | "Pickup">("Pickup");
+  const [overviewWarehouse, setOverviewWarehouse] = useState("All warehouses");
   const [taskSearch, setTaskSearch] = useState("");
-  const [warehouseFilter, setWarehouseFilter] = useState("All warehouse");
+  const [warehouseFilter, setWarehouseFilter] = useState("All warehouses");
   const [statusFilter, setStatusFilter] = useState("All status");
   const [newTaskWarehouseId, setNewTaskWarehouseId] = useState(warehouses.find((warehouse) => !warehouse.archivedAt)?.id ?? "");
   const [newTaskAssigneeIds, setNewTaskAssigneeIds] = useState<string[]>([]);
@@ -1542,8 +1646,16 @@ function Dashboard({
   const profileTriggerRef = useRef<HTMLButtonElement>(null);
   const taskPanelRef = useRef<HTMLElement>(null);
   const taskFirstInputRef = useRef<HTMLInputElement>(null);
+  const newTaskAttachmentInputRef = useRef<HTMLInputElement>(null);
+  const [newTaskAttachment, setNewTaskAttachment] = useState<TaskAttachment | null>(null);
 
   useDialogFocus(isTaskPanelOpen, taskPanelRef, () => setIsTaskPanelOpen(false), taskFirstInputRef);
+
+  useEffect(() => {
+    return () => {
+      if (newTaskAttachment?.url) URL.revokeObjectURL(newTaskAttachment.url);
+    };
+  }, [newTaskAttachment]);
 
   useEffect(() => {
     if (!isProfileMenuOpen) return;
@@ -1567,16 +1679,61 @@ function Dashboard({
     };
   }, [isProfileMenuOpen]);
 
+  function resetNewTaskPanel() {
+    setNewTaskType("Pickup");
+    if (newTaskAttachment?.url) URL.revokeObjectURL(newTaskAttachment.url);
+    setNewTaskAttachment(null);
+    setNewTaskAssigneeIds([]);
+    setNewTaskDate(activeDate ?? dateRange.from ?? todayInMelbourne());
+    setIsPriority(false);
+    setIsTaskPanelOpen(false);
+  }
+
+  function handleTaskAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      setFeedbackTone("error");
+      setFeedback("Please upload a PDF file.");
+      event.target.value = "";
+      return;
+    }
+    if (file.size < 1024 || file.size > MAX_TASK_ATTACHMENT_BYTES) {
+      setFeedbackTone("error");
+      setFeedback("Uploaded PDF must be between 1KB and 12MB.");
+      event.target.value = "";
+      return;
+    }
+    const nextAttachment: TaskAttachment = {
+      id: crypto.randomUUID(),
+      name: file.name,
+      type: file.type || "application/pdf",
+      size: file.size,
+      url: URL.createObjectURL(file),
+      file,
+    };
+    if (newTaskAttachment?.url) URL.revokeObjectURL(newTaskAttachment.url);
+    setNewTaskAttachment(nextAttachment);
+    setFeedback("");
+    event.target.value = "";
+  }
+
+  function removeTaskAttachment() {
+    if (newTaskAttachment?.url) URL.revokeObjectURL(newTaskAttachment.url);
+    setNewTaskAttachment(null);
+    if (newTaskAttachmentInputRef.current) newTaskAttachmentInputRef.current.value = "";
+  }
+
   const activeDate = dateRange.from && dateRange.from === dateRange.to ? dateRange.from : null;
   const hasDateFilter = Boolean(dateRange.from || dateRange.to);
   const activeTasks = tasks.filter((task) => !task.archivedAt);
   const dateFilteredTasks = activeTasks.filter((task) => isDateInRange(task.date, dateRange));
-  const scopedDashboardTasks = dateFilteredTasks.filter((task) => overviewWarehouse === "All warehouse" || task.warehouse === overviewWarehouse);
+  const scopedDashboardTasks = dateFilteredTasks.filter((task) => overviewWarehouse === "All warehouses" || task.warehouse === overviewWarehouse);
   const visibleTasks = scopedDashboardTasks.slice(0, 7);
   const filteredTasks = tasks.filter((task) => {
     const search = taskSearch.trim().toLowerCase();
     const matchesSearch = !search || [task.invoice, task.type, task.warehouse, task.assignee, task.description, task.notes, ...task.items.map((item) => item.name)].some((value) => value.toLowerCase().includes(search));
-    const matchesWarehouse = warehouseFilter === "All warehouse" || task.warehouse === warehouseFilter;
+    const matchesWarehouse = warehouseFilter === "All warehouses" || task.warehouse === warehouseFilter;
     const matchesStatus = statusFilter === "All status" ? !task.archivedAt : statusFilter === "Archived" ? Boolean(task.archivedAt) : !task.archivedAt && task.status === statusFilter;
     const matchesDate = isDateInRange(task.date, dateRange);
     return matchesSearch && matchesWarehouse && matchesStatus && matchesDate;
@@ -1594,7 +1751,7 @@ function Dashboard({
     : warehousesWithLiveStats(tasks.filter((task) => isDateInRange(task.date, dateRange)), warehouses.filter((warehouse) => warehouse.archivedAt));
 
   function openFilteredTasks(status = "All status", warehouse = overviewWarehouse) {
-    setStatusFilter(status); setWarehouseFilter(warehouse); setTaskSearch("");
+    setStatusFilter(status); setWarehouseFilter(warehouse === "All warehouse" ? "All warehouses" : warehouse); setTaskSearch("");
     setActiveSettings(null); setActiveNav("Tasks");
     window.scrollTo({ top: 0, behavior: "instant" });
   }
@@ -1614,8 +1771,9 @@ function Dashboard({
     setFeedbackTone("error"); setFeedback("This record is no longer available. Its history is preserved here.");
   }
 
-  function createTask(event: FormEvent<HTMLFormElement>) {
+  async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isTaskSubmitting) return;
     const data = new FormData(event.currentTarget);
     const invoice = String(data.get("invoice") || `INV-${tasks.length + 10458}`).trim().toUpperCase();
     if (tasks.some((task) => task.invoice.toUpperCase() === invoice)) {
@@ -1624,10 +1782,9 @@ function Dashboard({
       return;
     }
     const date = String(data.get("scheduled") || todayInMelbourne());
-    const quantity = String(data.get("quantity") || "1").trim();
-    if (!/^\d+(?:\s+\w+)?$/i.test(quantity)) {
+    if (!isOperationalDate(date)) {
       setFeedbackTone("error");
-      setFeedback("Enter a valid quantity, such as 24 or 24 boxes.");
+      setFeedback("Choose a valid schedule date.");
       return;
     }
     const warehouseId = String(data.get("warehouseId") || "");
@@ -1640,10 +1797,21 @@ function Dashboard({
       return;
     }
     const assignee = selectedAssignees.map((member) => member.name).join(", ");
-    const itemName = String(data.get("item") || "General order item").trim();
+    const note = String(data.get("notes") || "").trim();
+    if (note.length > 3900) {
+      setFeedbackTone("error");
+      setFeedback("Notes are too long. Shorten them to 3900 characters or less.");
+      return;
+    }
+    const taskType = String(data.get("type") || "Pickup");
+    if (taskType !== "Delivery" && taskType !== "Pickup") {
+      setFeedbackTone("error");
+      setFeedback("Choose Delivery or Pickup for the task type.");
+      return;
+    }
     const createdTask: Task = {
       invoice,
-      type: newTaskType,
+      type: taskType,
       warehouse: warehouse.name,
       warehouseId,
       assignee,
@@ -1653,34 +1821,116 @@ function Dashboard({
       date,
       scheduled: formatTaskDate(date),
       status: "Pending",
-      description: String(data.get("description") || "New operations task").trim(),
-      items: [{ id: `${invoice}-1`, name: itemName, quantity }],
-      notes: String(data.get("notes") || "").trim(),
+      description: note || "No notes added.",
+      items: [{ id: `${invoice}-${crypto.randomUUID()}`, name: "General order item", quantity: "1" }],
+      notes: "",
+      activityNotes: [],
+      attachments: newTaskAttachment ? [newTaskAttachment] : undefined,
       priority: isPriority,
     };
-    onTasksChange((current) => [
-      ...current,
-      createdTask,
-    ]);
-    onTeamTasksChange((current) => upsertByInvoice(current, taskToTeamTask(createdTask)));
-    onNoticesChange((current) => [{ id: crypto.randomUUID(), title: "Task created", message: `${invoice} was assigned to ${assignee}.`, time: "Just now", read: false }, ...current]);
-    setFeedbackTone("success");
-    setFeedback(`${invoice} created successfully.`);
-    setNewTaskAssigneeIds([]);
-    setIsTaskPanelOpen(false);
-    setActiveNav("Tasks");
+    setIsTaskSubmitting(true);
+    setFeedback("");
+    try {
+      const result = await createTaskAction({
+        invoice: createdTask.invoice,
+        type: createdTask.type.toLowerCase(),
+        warehouseId,
+        scheduledAt: localScheduleToUtc(createdTask.date),
+        status: statusToDto(createdTask.status),
+        description: createdTask.description,
+        priority: createdTask.priority,
+        assigneeIds,
+        items: createdTask.items,
+        note: createdTask.notes,
+      });
+      if (!result.ok) {
+        setFeedbackTone("error");
+        setFeedback(result.error);
+        return;
+      }
+
+      let savedSnapshot = result.data;
+      let savedTaskDto = savedSnapshot.tasks.find((task) => task.invoice.toUpperCase() === invoice);
+      let completionMessage = `${invoice} created successfully.`;
+      let completionTone: "success" | "error" = "success";
+
+      const attachment = newTaskAttachment?.file;
+      if (attachment && savedTaskDto) {
+        const supabase = getBrowserSupabase();
+        if (!supabase) {
+          completionTone = "error";
+          completionMessage = "The task was created, but the PDF could not be uploaded. Please try again from task details.";
+        } else {
+          const storagePath = `${savedTaskDto.id}/${crypto.randomUUID()}.pdf`;
+          const upload = await supabase.storage.from("task-invoices").upload(storagePath, attachment, { contentType: "application/pdf", upsert: false });
+          if (upload.error) {
+            completionTone = "error";
+            completionMessage = `The task was created, but the PDF upload failed: ${upload.error.message}`;
+          } else {
+            const attachmentResult = await registerTaskAttachmentAction({
+              taskId: savedTaskDto.id,
+              storagePath,
+              fileName: attachment.name,
+              fileSize: attachment.size,
+              mimeType: "application/pdf",
+            });
+            if (attachmentResult.ok) {
+              savedSnapshot = attachmentResult.data;
+              savedTaskDto = savedSnapshot.tasks.find((task) => task.invoice.toUpperCase() === invoice);
+            } else {
+              await supabase.storage.from("task-invoices").remove([storagePath]);
+              completionTone = "error";
+              completionMessage = `${attachmentResult.error} The task itself was created.`;
+            }
+          }
+        }
+      }
+
+      onSnapshot(savedSnapshot);
+      const savedTask = savedTaskDto ? taskFromDto(savedTaskDto) : createdTask;
+      setTaskSearch("");
+      setWarehouseFilter("All warehouses");
+      setStatusFilter("All status");
+      setOverviewWarehouse("All warehouses");
+      setDateRange({ from: null, to: null });
+      setActiveSettings(null);
+      setActiveNav("Tasks");
+      setSelectedOrder(savedTask);
+      setIsOrderEditing(false);
+      setFeedbackTone(completionTone);
+      setFeedback(completionMessage);
+      resetNewTaskPanel();
+    } catch (error) {
+      console.error("Task creation failed.", error);
+      setFeedbackTone("error");
+      setFeedback("The task could not be created. Please try again.");
+    } finally {
+      setIsTaskSubmitting(false);
+    }
   }
 
-  function saveOrder(updated: Task) {
-    onTasksChange((current) => current.map((task) => task.invoice === updated.invoice ? updated : task));
-    onTeamTasksChange((current) => {
-      const existing = current.find((task) => task.invoice === updated.invoice);
-      return upsertByInvoice(current, taskToTeamTask(updated, existing));
+  async function saveOrder(updated: Task): Promise<string | null> {
+    if (!updated.id || !updated.version) return "Reload this task before saving changes.";
+    const result = await updateTaskAction({
+      id: updated.id,
+      version: updated.version,
+      type: updated.type.toLowerCase(),
+      warehouseId: updated.warehouseId,
+      scheduledAt: updated.scheduledAt && updated.date === melbourneTaskDate(updated.scheduledAt) ? updated.scheduledAt : localScheduleToUtc(updated.date),
+      status: statusToDto(updated.status),
+      description: updated.description,
+      priority: updated.priority,
+      assigneeIds: updated.assigneeIds,
+      items: updated.items,
+      note: updated.notes.trim() || undefined,
     });
-    setSelectedOrder(updated);
-    onNoticesChange((current) => [{ id: crypto.randomUUID(), title: "Task updated", message: `${updated.invoice} details were saved.`, time: "Just now", read: false }, ...current]);
+    if (!result.ok) return result.error;
+    onSnapshot(result.data);
+    const saved = result.data.tasks.find((task) => task.id === updated.id);
+    setSelectedOrder(saved ? taskFromDto(saved) : updated);
     setFeedbackTone("success");
     setFeedback(`${updated.invoice} changes saved.`);
+    return null;
   }
 
   function deleteOrder(order: Task) {
@@ -1775,9 +2025,9 @@ function Dashboard({
           <p>{activeSettings ? <>The settings and administrative features play a crucial<br className="desktop-break" /> role.</> : activeNav === "Tasks" ? "Plan, assign and track every pickup, delivery and container." : activeNav === "Warehouses" ? <>Your active Amazing Tiles warehouse<br className="desktop-break" /> locations.</> : hasDateFilter ? `Showing operations for ${dateRangeLabel(dateRange)}.` : <>Everything moving smoothly through your warehouse<br className="desktop-break" /> network.</>}</p>
         </div>
         {!activeSettings ? <div className="overview-actions">
-          {activeNav === "Dashboard" ? <select className="overview-warehouse-filter" aria-label="Dashboard warehouse" value={overviewWarehouse} onChange={(event) => setOverviewWarehouse(event.target.value)}><option value="All warehouse">All warehouses</option>{warehouses.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => <option key={warehouse.id} value={warehouse.name}>{warehouse.name}</option>)}</select> : null}
+          {activeNav === "Dashboard" ? <div className="overview-warehouse-filter"><TaskFilterSelect label="Dashboard warehouse" value={overviewWarehouse} options={["All warehouses", ...warehouses.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => warehouse.name)]} onChange={setOverviewWarehouse} /></div> : null}
           <DateFilter value={dateRange} onChange={setDateRange} />
-          {activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => { setNewTaskAssigneeIds([]); setNewTaskDate(activeDate ?? dateRange.from ?? todayInMelbourne()); setIsPriority(false); setIsTaskPanelOpen(true); }}>
+          {activeNav !== "Warehouses" ? <button className="primary-button" type="button" onClick={() => { setNewTaskAssigneeIds([]); setNewTaskAttachment(null); setNewTaskDate(activeDate ?? dateRange.from ?? todayInMelbourne()); setIsPriority(false); setIsTaskPanelOpen(true); }}>
             <img src="/assets/icon-add.svg" alt="" /> Add new task
           </button> : null}
         </div> : null}
@@ -1804,7 +2054,7 @@ function Dashboard({
       ) : activeNav === "Warehouses" ? (
         <>
         <div className="warehouse-management-controls">
-          <label><span className="sr-only">Warehouse archive filter</span><select value={warehouseListFilter} onChange={(event) => setWarehouseListFilter(event.target.value as "Active" | "Archived")}><option>Active</option><option>Archived</option></select></label>
+          <TaskFilterSelect label="Warehouse archive filter" value={warehouseListFilter} onChange={(next) => setWarehouseListFilter(next as "Active" | "Archived")} options={["Active", "Archived"]} />
           <button className="primary-button" type="button" onClick={() => { setEditingWarehouse(null); setWarehouseError(""); }}><img src="/assets/icon-add.svg" alt="" /> Add warehouse</button>
         </div>
         <section className="warehouse-grid" aria-label={`${warehouseListFilter} warehouse locations`}>
@@ -1847,12 +2097,8 @@ function Dashboard({
               <img src="/assets/icon-search.svg" alt="" />
               <input value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} placeholder="Search invoice, description or team member..." aria-label="Search tasks" />
             </label>
-            <select value={warehouseFilter} onChange={(event) => setWarehouseFilter(event.target.value)} aria-label="Filter by warehouse">
-              <option>All warehouse</option>{Array.from(new Set(tasks.map((task) => task.warehouse))).map((warehouse) => <option key={warehouse}>{warehouse}</option>)}
-            </select>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by status">
-              <option>All status</option><option>Pending</option><option>In Progress</option><option>Complete</option><option>Delayed</option><option>Archived</option>
-            </select>
+            <TaskFilterSelect label="Filter by warehouse" value={warehouseFilter} options={["All warehouses", ...warehouses.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => warehouse.name)]} onChange={setWarehouseFilter} />
+            <TaskFilterSelect label="Filter by status" value={statusFilter} options={["All status", "Pending", "In Progress", "Complete", "Delayed", "Archived"]} onChange={setStatusFilter} />
           </div>
 
           <TaskTable tasks={filteredTasks} onSelect={(task) => { setSelectedOrder(task); setIsOrderEditing(false); }} />
@@ -1869,16 +2115,6 @@ function Dashboard({
             ))}
           </section>
 
-          <section className="warehouse-breakdown" aria-labelledby="warehouse-breakdown-title">
-            <div className="task-board__header"><div><h2 id="warehouse-breakdown-title">By warehouse</h2><span>{dateRangeLabel(dateRange)} · Task status at each location</span></div></div>
-            <div className="warehouse-breakdown__head" aria-hidden="true"><span>Warehouse</span>{["Pending", "In Progress", "Complete", "Delayed"].map((status) => <span key={status}>{status}</span>)}</div>
-            {liveWarehouses.filter((warehouse) => overviewWarehouse === "All warehouse" || warehouse.name === overviewWarehouse).map((warehouse) => <div className="warehouse-breakdown__row" key={warehouse.id}>
-              <button type="button" className="warehouse-breakdown__name" onClick={() => openFilteredTasks("All status", warehouse.name)}>{warehouse.name}</button>
-              {warehouse.statuses.map((status) => <button type="button" className={`warehouse-breakdown__count stat-note--${status.tone}`} key={status.label} aria-label={`View ${warehouse.name}: ${status.value} ${status.label} tasks`} onClick={() => openFilteredTasks(status.label, warehouse.name)}><span className="warehouse-breakdown__mobile-label">{status.label}</span><strong>{status.value}</strong></button>)}
-            </div>)}
-            {!liveWarehouses.length ? <p>No active warehouses yet.</p> : null}
-          </section>
-
           <section className="task-board" aria-labelledby="task-board-title">
             <div className="task-board__header">
               <div><span>{hasDateFilter ? dateRangeLabel(dateRange) : "Live Operations"}</span><h2 id="task-board-title">{hasDateFilter ? "Selected Range Tasks" : "Task Board"}</h2></div>
@@ -1892,7 +2128,7 @@ function Dashboard({
       )}
 
       {isTaskPanelOpen ? (
-        <div className="task-panel-backdrop" onMouseDown={() => setIsTaskPanelOpen(false)}>
+        <div className="task-panel-backdrop" onMouseDown={() => { if (!isTaskSubmitting) resetNewTaskPanel(); }}>
           <aside
             ref={taskPanelRef}
             className="task-panel"
@@ -1905,92 +2141,94 @@ function Dashboard({
               <div>
                 <span>Operations</span>
                 <h2 id="create-task-title">Create new task</h2>
+                <p>Add the essentials now. You can update the task later.</p>
               </div>
-              <button className="task-panel__close" type="button" onClick={() => setIsTaskPanelOpen(false)} aria-label="Close create task panel">
+              <button className="task-panel__close" type="button" onClick={resetNewTaskPanel} aria-label="Close create task panel" disabled={isTaskSubmitting}>
                 <span aria-hidden="true">×</span>
               </button>
             </div>
 
-            <form className="task-form" onSubmit={createTask}>
-              <div className="task-type-picker" aria-label="Task type">
-                {(["Pickup", "Delivery", "Container"] as Task["type"][]).map((type) => (
-                  <button
-                    className={`task-type-option ${newTaskType === type ? "task-type-option--active" : ""}`}
-                    type="button"
-                    key={type}
-                    onClick={() => setNewTaskType(type)}
-                    aria-pressed={newTaskType === type}
-                  >
-                    {type === "Delivery" ? <img src="/assets/icon-delivery.svg" alt="" /> : type === "Pickup" ? <PickupIcon /> : <ContainerIcon />}
-                    {type}
-                  </button>
-                ))}
-              </div>
+            <form className="task-form" onSubmit={createTask} aria-busy={isTaskSubmitting}>
+              <div className="task-form__body">
+                <section className="task-form__group" aria-labelledby="new-task-essentials">
+                  <div className="task-form__group-head"><span>1</span><div><strong id="new-task-essentials">Task essentials</strong><small>Identify and schedule the work</small></div></div>
+                  <div className="form-field">
+                    <span>Task type</span>
+                    <input type="hidden" name="type" value={newTaskType} />
+                    <div className="task-type-picker task-type-picker--two" role="group" aria-label="Task type">
+                      {(["Delivery", "Pickup"] as const).map((type) => (
+                        <button key={type} type="button" className={`task-type-option${newTaskType === type ? " task-type-option--active" : ""}`} aria-pressed={newTaskType === type} onClick={() => setNewTaskType(type)}>{type === "Delivery" ? <img src="/assets/icon-delivery.svg" alt="" /> : <PickupIcon />}{type}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="task-form__row">
+                    <label className="form-field">
+                      <span>Invoice number</span>
+                      <input ref={taskFirstInputRef} name="invoice" placeholder="e.g. INV-10458" required />
+                    </label>
+                    <div className="form-field">
+                      <span>Schedule date</span>
+                      <DateFilter mode="single" name="scheduled" value={{ from: newTaskDate, to: newTaskDate }} onChange={(range) => { if (range.from) setNewTaskDate(range.from); }} />
+                    </div>
+                  </div>
+                </section>
 
-              <label className="form-field">
-                <span>Invoice number</span>
-                <input ref={taskFirstInputRef} name="invoice" placeholder="e.g. INV- 10458" required />
-              </label>
+                <section className="task-form__group" aria-labelledby="new-task-document">
+                  <div className="task-form__group-head"><span>2</span><div><strong id="new-task-document">Invoice document</strong><small>Optional · PDF up to 12 MB</small></div></div>
+                  <label className="form-field">
+                    <span className="sr-only">Upload invoice PDF</span>
+                    <div className="task-upload">
+                      <input
+                        ref={newTaskAttachmentInputRef}
+                        type="file"
+                        name="invoicePdf"
+                        className="task-upload__input"
+                        accept="application/pdf,.pdf"
+                        onChange={handleTaskAttachmentChange}
+                        aria-label="Upload invoice PDF"
+                      />
+                      <span className="task-upload__badge" aria-hidden="true">PDF</span>
+                      <span className="task-upload__copy"><strong>{newTaskAttachment ? newTaskAttachment.name : "Attach invoice PDF"}</strong><small>{newTaskAttachment ? formatBytes(newTaskAttachment.size) : "The team can view it from Order Details"}</small></span>
+                      <button type="button" className="task-upload__button" onClick={() => newTaskAttachmentInputRef.current?.click()}>{newTaskAttachment ? "Replace" : "Choose PDF"}</button>
+                      {newTaskAttachment ? <button type="button" className="task-upload__remove" onClick={removeTaskAttachment}>Remove</button> : null}
+                    </div>
+                  </label>
+                </section>
 
-              <div className="form-field">
-                <span>Schedule date</span>
-                <DateFilter mode="single" name="scheduled" value={{ from: newTaskDate, to: newTaskDate }} onChange={(range) => { if (range.from) setNewTaskDate(range.from); }} />
-              </div>
+                <section className="task-form__group" aria-labelledby="new-task-assignment">
+                  <div className="task-form__group-head"><span>3</span><div><strong id="new-task-assignment">Assignment</strong><small>Choose where the work goes</small></div></div>
+                  <div className="task-form__row">
+                    <div className="form-field">
+                      <span>Warehouse</span>
+                      <TaskFilterSelect label="Warehouse" name="warehouseId" value={newTaskWarehouseId} onChange={(next) => { setNewTaskWarehouseId(next); setNewTaskAssigneeIds([]); }} required options={[{ value: "", label: "Select warehouse" }, ...warehouses.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => ({ value: warehouse.id ?? "", label: warehouse.name }))]} />
+                    </div>
+                    <div className="form-field">
+                      <span>Assignees</span>
+                      <MultiAssigneeSelect
+                        options={administrators.filter((member) => member.role === "Team member" && member.status === "Verified" && member.warehouseIds?.includes(newTaskWarehouseId)).map((member) => ({ id: member.id, name: member.name }))}
+                        selectedIds={newTaskAssigneeIds}
+                        onChange={setNewTaskAssigneeIds}
+                      />
+                    </div>
+                  </div>
+                </section>
 
-              <label className="form-field">
-                <span>Description</span>
-                <textarea name="description" placeholder="Short summary of the order or operational work" rows={3} />
-              </label>
-
-              <div className="task-form__row">
-                <label className="form-field">
-                  <span>Item</span>
-                  <input name="item" placeholder="e.g. Calacatta Cloud tiles" />
-                </label>
-                <label className="form-field form-field--quantity">
-                  <span>Quantity</span>
-                  <input name="quantity" inputMode="numeric" placeholder="24" />
-                </label>
-              </div>
-
-              <div className="task-form__row">
-                <label className="form-field">
-                  <span>Warehouse</span>
-                  <select name="warehouseId" value={newTaskWarehouseId} onChange={(event) => { setNewTaskWarehouseId(event.target.value); setNewTaskAssigneeIds([]); }} required>
-                    <option value="" disabled>Select warehouse</option>
-                    {warehouses.filter((warehouse) => !warehouse.archivedAt).map((warehouse) => <option value={warehouse.id} key={warehouse.id}>{warehouse.name}</option>)}
-                  </select>
-                </label>
-                <div className="form-field">
-                  <span>Assigned to (select one or more)</span>
-                  <MultiAssigneeSelect
-                    options={administrators.filter((member) => member.role === "Team member" && member.status === "Verified" && member.warehouseIds?.includes(newTaskWarehouseId)).map((member) => ({ id: member.id, name: member.name }))}
-                    selectedIds={newTaskAssigneeIds}
-                    onChange={setNewTaskAssigneeIds}
-                  />
-                </div>
-              </div>
-
-              <label className="form-field">
-                <span>Notes</span>
-                <textarea name="notes" placeholder="Access details, customer instructions or internal notes" rows={3} />
-              </label>
-
-              <div className="priority-row">
-                <div><strong>Priority task</strong><span>Mark this task as high priority</span></div>
-                <button
-                  className={`priority-switch ${isPriority ? "priority-switch--active" : ""}`}
-                  type="button"
-                  role="switch"
-                  aria-checked={isPriority}
-                  aria-label="High priority"
-                  onClick={() => setIsPriority((value) => !value)}
-                ><span /></button>
+                <section className="task-form__group task-form__group--optional" aria-labelledby="new-task-notes">
+                  <div className="task-form__group-head"><span>4</span><div><strong id="new-task-notes">Notes and priority</strong><small>Optional instructions for the team</small></div></div>
+                  <label className="form-field">
+                    <span className="sr-only">Notes</span>
+                    <textarea name="notes" placeholder="Add access details or customer instructions" rows={2} />
+                  </label>
+                  <div className="priority-row">
+                    <div><strong>Priority</strong><span>Mark urgent tasks as high</span></div>
+                    <PriorityPicker value={isPriority} onChange={setIsPriority} />
+                  </div>
+                </section>
               </div>
 
               <div className="task-form__actions">
-                <button className="cancel-button" type="button" onClick={() => setIsTaskPanelOpen(false)}>Cancel</button>
-                <button className="create-button" type="submit">Create Task</button>
+                <button className="cancel-button" type="button" onClick={resetNewTaskPanel} disabled={isTaskSubmitting}>Cancel</button>
+                <button className="create-button" type="submit" disabled={isTaskSubmitting}>{isTaskSubmitting ? "Creating task…" : "Create task"}</button>
               </div>
             </form>
           </aside>
@@ -2110,7 +2348,16 @@ function WarehouseTeamDashboard({
     && (!teamSearch.trim() || [task.invoice, task.description, task.location, task.assignee, task.summary].some((value) => value.toLowerCase().includes(teamSearch.trim().toLowerCase()))))
     .sort((left, right) => compareTeamTasks(left, right, today));
   const currentSelectedTask = tasks.find((task) => task.id === selectedOrder?.id);
-  const currentSelectedOrder = selectedOrder && currentSelectedTask ? { ...selectedOrder, status: currentSelectedTask.status, activityNotes: currentSelectedTask.activityNotes, assigneeIds: currentSelectedTask.assigneeIds, version: currentSelectedTask.version } : selectedOrder;
+  const currentSelectedOrder = selectedOrder && currentSelectedTask
+    ? {
+      ...selectedOrder,
+      status: currentSelectedTask.status,
+      activityNotes: currentSelectedTask.activityNotes,
+      assigneeIds: currentSelectedTask.assigneeIds,
+      version: currentSelectedTask.version,
+      attachments: currentSelectedTask.attachments ?? selectedOrder.attachments,
+    }
+    : selectedOrder;
   const warehouseScopeTasks = scope === "My Tasks" ? assignedTasks : companyTasks;
   const dateFilteredWarehouseTasks = warehouseScopeTasks.filter((task) => isDateInRange(task.isoDate, dateRange));
   const liveWarehouses = warehousesWithLiveStats(dateFilteredWarehouseTasks, warehouses.filter((warehouse) => !warehouse.archivedAt));
@@ -2144,6 +2391,7 @@ function WarehouseTeamDashboard({
       version: task.version,
       archivedAt: task.archivedAt,
       activityNotes: task.activityNotes,
+      attachments: task.attachments,
     });
     setIsOrderEditing(false);
   }
@@ -2275,13 +2523,16 @@ function WarehouseTeamDashboard({
                   aria-pressed={scope === option}
                   onClick={() => setScope(option)}
                 >
-                  {activeView === "Warehouses Network" ? option === "My Tasks" ? "My warehouses" : "All warehouses" : option === "My Tasks" ? "Assigned to me" : option}
+                  {option === "My Tasks" ? (activeView === "Warehouses Network" ? "My warehouses" : "Assigned to me") : "All warehouses"}
                 </button>
               ))}
             </div>
             {activeView === "My Tasks" ? <div className="team-list-filters">
-              <input type="search" aria-label="Search team tasks" placeholder="Search invoice or task" value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} />
-              <select aria-label="Team task status" value={teamStatusFilter} onChange={(event) => setTeamStatusFilter(event.target.value)}><option>All status</option><option>Pending</option><option>In Progress</option><option>Complete</option><option>Delayed</option></select>
+              <label className="team-task-search">
+                <img src="/assets/icon-search.svg" alt="" />
+                <input type="search" aria-label="Search team tasks" placeholder="Search invoice or task" value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} />
+              </label>
+              <TaskFilterSelect label="Team task status" value={teamStatusFilter} options={["All status", "Pending", "In Progress", "Complete", "Delayed"]} onChange={setTeamStatusFilter} />
             </div> : null}
           </section>
 
@@ -2451,6 +2702,7 @@ function statusToDto(status: Status): TaskDTO["status"] {
 }
 
 function taskFromDto(task: TaskDTO): Task {
+  const parsedNotes = parseTaskNotes(task.notes);
   const date = melbourneTaskDate(task.scheduledAt);
   const names = task.assignees.map((assignee) => assignee.fullName);
   return {
@@ -2470,10 +2722,22 @@ function taskFromDto(task: TaskDTO): Task {
     description: task.description,
     items: task.items.map((item) => ({ id: item.id, name: item.name, quantity: item.quantity })),
     notes: "",
-    activityNotes: task.notes,
+    activityNotes: parsedNotes.activityNotes,
     priority: task.priority,
     version: task.version,
     archivedAt: task.archivedAt,
+    attachments: [
+      ...task.attachments.map((attachment) => ({
+        id: attachment.id,
+        name: attachment.fileName,
+        type: attachment.mimeType,
+        size: attachment.fileSize,
+        url: attachment.url ?? undefined,
+      })),
+      ...parsedNotes.attachments
+        .filter((legacyAttachment) => !task.attachments.some((attachment) => attachment.id === legacyAttachment.id))
+        .map((attachment) => ({ ...attachment })),
+    ],
   };
 }
 
@@ -2482,7 +2746,9 @@ function teamTaskFromDto(task: TaskDTO): TeamTask {
   return {
     invoice: managerTask.invoice,
     title: managerTask.description || `${managerTask.type} task for ${managerTask.warehouse}`,
-    summary: managerTask.items.map((item) => `${item.quantity} ${item.name}`).join(" · ") || "No items listed",
+    summary: managerTask.items.some((item) => item.name !== "General order item")
+      ? managerTask.items.map((item) => `${item.quantity} ${item.name}`).join(" · ")
+      : managerTask.attachments?.length ? "Invoice PDF attached" : "Invoice task",
     isoDate: managerTask.date,
     date: formatCompactDate(managerTask.date),
     time: melbourneTaskTime(task.scheduledAt),
@@ -2501,7 +2767,8 @@ function teamTaskFromDto(task: TaskDTO): TeamTask {
     scheduledAt: task.scheduledAt,
     version: task.version,
     archivedAt: task.archivedAt,
-    activityNotes: task.notes,
+    activityNotes: managerTask.activityNotes,
+    attachments: managerTask.attachments,
   } as TeamTask;
 }
 
@@ -2599,7 +2866,7 @@ export default function Home() {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => void reload(), 180);
     };
-    const topics = ["tasks", "task_assignees", "task_notes", "warehouses", "notifications"];
+    const topics = ["tasks", "task_assignees", "task_notes", "task_attachments", "warehouses", "notifications"];
     const channels = topics.map((topic) => supabase
       .channel(`operations:${topic}`, { config: { private: true } })
       .on("broadcast", { event: "*" }, refreshSoon)
@@ -2621,11 +2888,50 @@ export default function Home() {
     const removed = previous.find((task) => !next.some((current) => current.id ? current.id === task.id : current.invoice === task.invoice));
     const changed = next.find((task) => task.id && JSON.stringify(task) !== JSON.stringify(previous.find((current) => current.id === task.id)));
     void (async () => {
-      let result;
+      let result: ActionResult<OperationsSnapshot> | undefined;
       if (added) {
         const warehouseId = added.warehouseId ?? snapshot?.warehouses.find((warehouse) => warehouse.name === added.warehouse)?.id;
         const assigneeIds = added.assigneeIds?.length ? added.assigneeIds : snapshot?.staff.filter((staff) => added.assignee.split(", ").includes(staff.fullName)).map((staff) => staff.id) ?? [];
         result = await createTaskAction({ invoice: added.invoice, type: added.type.toLowerCase(), warehouseId, scheduledAt: added.scheduledAt ?? localScheduleToUtc(added.date), status: statusToDto(added.status), description: added.description, priority: added.priority, assigneeIds, items: added.items, note: added.notes });
+        if (!result.ok) {
+          handleResult(result, () => setManagerTasksState(previous));
+          return;
+        }
+        const createdSnapshot = result.data;
+        const attachment = added.attachments?.find((item) => item.file)?.file;
+        if (attachment) {
+          const createdTask = createdSnapshot.tasks.find((task) => task.invoice.toUpperCase() === added.invoice.toUpperCase());
+          const supabase = getBrowserSupabase();
+          if (!createdTask || !supabase) {
+            applySnapshot(createdSnapshot);
+            setBackendMessage("The task was created, but the PDF could not be uploaded. Please try again.");
+            return;
+          }
+          const storagePath = `${createdTask.id}/${crypto.randomUUID()}.pdf`;
+          const upload = await supabase.storage.from("task-invoices").upload(storagePath, attachment, { contentType: "application/pdf", upsert: false });
+          if (upload.error) {
+            applySnapshot(createdSnapshot);
+            setBackendMessage(`The task was created, but the PDF upload failed: ${upload.error.message}`);
+            return;
+          }
+          const attachmentResult = await registerTaskAttachmentAction({
+            taskId: createdTask.id,
+            storagePath,
+            fileName: attachment.name,
+            fileSize: attachment.size,
+            mimeType: "application/pdf",
+          });
+          if (!attachmentResult.ok) {
+            await supabase.storage.from("task-invoices").remove([storagePath]);
+            applySnapshot(createdSnapshot);
+            setBackendMessage(`${attachmentResult.error} The task itself was created.`);
+            return;
+          }
+          handleResult(attachmentResult, () => applySnapshot(createdSnapshot));
+          return;
+        }
+        handleResult(result, () => setManagerTasksState(previous));
+        return;
       } else if (removed?.id) {
         result = await archiveTaskAction(removed.id);
       } else if (changed?.id) {

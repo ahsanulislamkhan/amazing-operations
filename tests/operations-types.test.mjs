@@ -32,7 +32,9 @@ test("the frontend does not restore demo persistence or staff presence", async (
   assert.doesNotMatch(source, /localStorage|sessionStorage/);
   assert.doesNotMatch(source, /team-online|Online status|Supabase Presence/);
   assert.match(source, /Sign in to Operations/);
-  assert.match(source, /Work E-mail/);
+  assert.match(source, /<span>Email<\/span>/);
+  assert.match(source, /placeholder="Enter email"/);
+  assert.match(source, /placeholder="Enter password"/);
   assert.match(source, /Remember this device/);
   assert.match(source, /Forgot password/);
   assert.doesNotMatch(source, /Choose your access type/);
@@ -63,5 +65,8 @@ test("the date picker exposes a visible confirmation action and every warehouse 
 
   assert.match(dateFilter, /date-filter__actions/);
   assert.match(dateFilter, />Done<\/button>/);
-  assert.match(page, /progress:\s*"\/assets\/icon-clock\.svg"/);
+  const progressIcon = page.match(/progress:\s*"(\/assets\/[^\"]+\.svg)"/);
+  assert.ok(progressIcon, "In Progress must map to a real SVG asset");
+  const icon = await readFile(new URL(`../public${progressIcon[1]}`, import.meta.url), "utf8");
+  assert.match(icon, /<svg\b/);
 });

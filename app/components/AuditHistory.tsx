@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import DateFilter from "./DateFilter";
+import TaskFilterSelect from "./TaskFilterSelect";
 import { loadAuditPageAction, type AuditPage } from "../actions/audit";
 import { auditChanges, auditCsv, auditReference } from "@/lib/operations/audit";
 import type { AuditEventDTO, DateRange } from "@/lib/operations/types";
@@ -72,9 +73,9 @@ export default function AuditHistory({ staff, warehouses, onOpenRecord, loadPage
     <div className="settings-intro"><h2>Audit History</h2><p>Who changed what, and when. History is read-only.</p></div>
     <div className="audit-filters">
       <input aria-label="Search audit history" type="search" placeholder="Search invoice, name or note" value={search} onChange={(event) => setSearch(event.target.value)} />
-      <select aria-label="Audit actor" value={actor} onChange={(event) => setActor(event.target.value)}><option value="">All people</option><option value="system">System</option>{staff.map((row) => <option value={row.id} key={row.id}>{row.name}</option>)}</select>
-      <select aria-label="Audit record type" value={entity} onChange={(event) => setEntity(event.target.value)}><option value="">All records</option>{entityOptions.map((option) => <option key={option} value={option}>{label(option)}</option>)}</select>
-      <select aria-label="Audit action" value={action} onChange={(event) => setAction(event.target.value)}><option value="">All actions</option><option value="insert">Created</option><option value="update">Updated</option><option value="delete">Removed</option><option value="warehouse_access_changed">Warehouse access</option></select>
+      <TaskFilterSelect label="Audit actor" value={actor} onChange={setActor} options={[{ value: "", label: "All people" }, { value: "system", label: "System" }, ...staff.map((row) => ({ value: row.id, label: row.name }))]} />
+      <TaskFilterSelect label="Audit record type" value={entity} onChange={setEntity} options={[{ value: "", label: "All records" }, ...entityOptions.map((option) => ({ value: option, label: label(option) }))]} />
+      <TaskFilterSelect label="Audit action" value={action} onChange={setAction} options={[{ value: "", label: "All actions" }, { value: "insert", label: "Created" }, { value: "update", label: "Updated" }, { value: "delete", label: "Removed" }, { value: "warehouse_access_changed", label: "Warehouse access" }]} />
       <DateFilter value={range} onChange={setRange} />
     </div>
     <div className="audit-toolbar"><button type="button" className="secondary-button" onClick={() => { setSearch(""); setActor(""); setEntity(""); setAction(""); setRange({ from: null, to: null }); }}>Clear filters</button><button type="button" className="secondary-button" disabled={!page.events.length || pending} onClick={exportLoaded}>Export loaded results</button></div>

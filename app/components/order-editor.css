@@ -1,0 +1,37 @@
+.order-details--editing .order-detail-row {
+  grid-template-columns: minmax(120px, .85fr) minmax(0, 1.15fr);
+  gap: 20px;
+  padding-block: 10px;
+}
+
+.order-details--editing .order-detail-row .date-filter,
+.order-details--editing .order-detail-row .task-filter-select,
+.order-details--editing .order-detail-row .multi-assignee {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.order-details--editing .order-detail-row .date-filter__trigger,
+.order-details--editing .order-detail-row .task-filter-select__trigger,
+.order-details--editing .order-detail-row .multi-assignee__trigger {
+  height: 48px;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1px solid #cad5e2;
+  border-radius: 999px;
+  color: #334155;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  box-shadow: none;
+}
+
+@media (max-width: 480px) {
+  .order-details--editing .order-detail-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding-block: 12px;
+  }
+}

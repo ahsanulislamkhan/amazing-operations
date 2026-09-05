@@ -32,6 +32,13 @@ const createTaskSchema = z.object({
   note: z.string().trim().max(4000).optional(),
 });
 const updateTaskSchema = createTaskSchema.omit({ invoice: true }).extend({ id: uuid, version: z.number().int().positive(), archivedAt: z.string().nullable().optional() });
+const taskAttachmentSchema = z.object({
+  taskId: uuid,
+  storagePath: z.string().trim().min(3).max(500),
+  fileName: z.string().trim().min(1).max(240),
+  fileSize: z.number().int().min(1).max(12 * 1024 * 1024),
+  mimeType: z.literal("application/pdf"),
+}).refine((value) => value.storagePath.startsWith(`${value.taskId}/`), { message: "Invalid attachment path." });
 
 async function refreshAfterMutation(): Promise<ActionResult<OperationsSnapshot>> {
   after(async () => {
@@ -67,6 +74,23 @@ export async function createTaskAction(input: unknown): Promise<ActionResult<Ope
   });
   if (error || !data) return { ok: false, error: error?.message ?? "The task could not be created.", code: error?.code };
   return refreshAfterMutation();
+}
+
+export async function registerTaskAttachmentAction(input: unknown): Promise<ActionResult<OperationsSnapshot>> {
+  const parsed = taskAttachmentSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the uploaded PDF.", code: "INVALID_INPUT" };
+  const context = await requireManager();
+  if (!context.ok) return context;
+  const { error } = await context.data.supabase.from("task_attachments").insert({
+    task_id: parsed.data.taskId,
+    storage_path: parsed.data.storagePath,
+    file_name: parsed.data.fileName,
+    mime_type: parsed.data.mimeType,
+    file_size: parsed.data.fileSize,
+    uploaded_by: context.data.profile.id,
+  });
+  if (error) return { ok: false, error: "The PDF was uploaded but could not be attached to the task.", code: error.code };
+  return loadOperationsSnapshot();
 }
 
 export async function updateTaskAction(input: unknown): Promise<ActionResult<OperationsSnapshot>> {

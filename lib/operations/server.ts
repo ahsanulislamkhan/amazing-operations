@@ -10,6 +10,7 @@ import type {
   NoticeDTO,
   OperationsSnapshot,
   StaffDTO,
+  TaskAttachmentDTO,
   TaskAssigneeDTO,
   TaskDTO,
   TaskItemDTO,
@@ -58,7 +59,11 @@ function mapStaff(rowValue: unknown): StaffDTO {
   };
 }
 
-function mapTask(rowValue: unknown, staffNames: ReadonlyMap<string, string>): TaskDTO {
+function mapTask(
+  rowValue: unknown,
+  staffNames: ReadonlyMap<string, string>,
+  signedAttachmentUrls: ReadonlyMap<string, string>,
+): TaskDTO {
   const row = asObject(rowValue);
   const warehouse = asObject(row.warehouse);
   const items: TaskItemDTO[] = asArray(row.items).map((itemValue) => {
@@ -90,6 +95,17 @@ function mapTask(rowValue: unknown, staffNames: ReadonlyMap<string, string>): Ta
       createdAt: String(note.created_at ?? ""),
     };
   });
+  const attachments: TaskAttachmentDTO[] = asArray(row.attachments).map((attachmentValue) => {
+    const attachment = asObject(attachmentValue);
+    const storagePath = String(attachment.storage_path ?? "");
+    return {
+      id: String(attachment.id ?? ""),
+      fileName: String(attachment.file_name ?? "Invoice.pdf"),
+      mimeType: "application/pdf",
+      fileSize: Number(attachment.file_size ?? 0),
+      url: signedAttachmentUrls.get(storagePath) ?? null,
+    };
+  });
   return {
     id: String(row.id ?? ""),
     invoice: String(row.invoice ?? ""),
@@ -103,6 +119,7 @@ function mapTask(rowValue: unknown, staffNames: ReadonlyMap<string, string>): Ta
     priority: Boolean(row.priority),
     items: items.sort((left, right) => left.sortOrder - right.sortOrder),
     notes: notes.sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+    attachments,
     version: Number(row.version ?? 1),
     archivedAt: row.archived_at ? String(row.archived_at) : null,
   };
@@ -165,7 +182,8 @@ export async function loadOperationsSnapshot(): Promise<ActionResult<OperationsS
       warehouse:warehouses(id, name),
       items:task_items(id, name, quantity, sort_order),
       assignments:task_assignees(staff_id),
-      notes:task_notes(id, author_id, body, created_at)
+      notes:task_notes(id, author_id, body, created_at),
+      attachments:task_attachments(id, storage_path, file_name, mime_type, file_size, created_at)
     `).order("scheduled_at", { ascending: true }),
     supabase.from("warehouses").select("id, office_type, name, address, status, archived_at").order("name"),
     profile.role === "manager"
@@ -209,6 +227,21 @@ export async function loadOperationsSnapshot(): Promise<ActionResult<OperationsS
     return [String(staff.id ?? ""), String(staff.full_name ?? "")] as const;
   }).filter(([id]) => Boolean(id)));
 
+  const attachmentPaths = taskRows.flatMap((taskValue) => asArray(asObject(taskValue).attachments)
+    .map((attachmentValue) => String(asObject(attachmentValue).storage_path ?? ""))
+    .filter(Boolean));
+  const signedAttachmentUrls = new Map<string, string>();
+  if (attachmentPaths.length) {
+    const signedResult = await supabase.storage.from("task-invoices").createSignedUrls(attachmentPaths, 3600);
+    if (signedResult.error) {
+      console.error("Task invoice links could not be created.", signedResult.error);
+    } else {
+      signedResult.data.forEach((item) => {
+        if (item.path && item.signedUrl) signedAttachmentUrls.set(item.path, item.signedUrl);
+      });
+    }
+  }
+
   const preferenceRow = asObject(preferencesResult.data);
   const preferences = { ...defaultPreferences, ...asObject(preferenceRow.preferences) } as NotificationPreferencesDTO;
   const notices: NoticeDTO[] = asArray(noticesResult.data).map((noticeValue) => {
@@ -242,7 +275,7 @@ export async function loadOperationsSnapshot(): Promise<ActionResult<OperationsS
     ok: true,
     data: {
       account: profile,
-      tasks: taskRows.map((task) => mapTask(task, staffNames)),
+      tasks: taskRows.map((task) => mapTask(task, staffNames, signedAttachmentUrls)),
       warehouses: asArray(warehousesResult.data).map(mapWarehouse),
       staff: profile.role === "manager" ? staffRows.map(mapStaff) : [],
       notices,
