@@ -174,5 +174,6 @@ export function canTeamTransition(from: TaskStatus, to: TaskStatus): boolean {
   if (from === "pending") return to === "in_progress" || to === "delayed";
   if (from === "in_progress") return to === "complete" || to === "delayed";
   if (from === "delayed") return to === "in_progress" || to === "complete";
+  if (from === "complete") return to === "pending" || to === "in_progress" || to === "delayed";
   return false;
 }

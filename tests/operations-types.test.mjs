@@ -22,7 +22,9 @@ test("warehouse team transitions follow the approved state machine", () => {
   assert.equal(canTeamTransition("pending", "complete"), false);
   assert.equal(canTeamTransition("in_progress", "complete"), true);
   assert.equal(canTeamTransition("delayed", "complete"), true);
-  assert.equal(canTeamTransition("complete", "in_progress"), false);
+  assert.equal(canTeamTransition("complete", "pending"), true);
+  assert.equal(canTeamTransition("complete", "in_progress"), true);
+  assert.equal(canTeamTransition("complete", "delayed"), true);
 });
 
 test("the frontend does not restore demo persistence or staff presence", async () => {
