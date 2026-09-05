@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { DateRange } from "@/lib/operations/types";
 import "./date-filter.css";
 
@@ -82,6 +82,7 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
   const [draft, setDraft] = useState(value);
   const [activeEndpoint, setActiveEndpoint] = useState<RangeEndpoint>("from");
   const [visibleMonth, setVisibleMonth] = useState(() => monthFromIso(value.from ?? value.to ?? todayInMelbourne()));
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties>({});
   const [error, setError] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -89,6 +90,22 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
   const label = labelForRange(value);
   const weeks = useMemo(() => calendarWeeks(visibleMonth), [visibleMonth]);
   const today = todayInMelbourne();
+
+  const positionPopover = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger || window.innerWidth <= 700) {
+      setPopoverStyle({});
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    const margin = 12;
+    const availableBelow = Math.max(240, window.innerHeight - rect.bottom - margin * 2);
+    const availableAbove = Math.max(240, rect.top - margin * 2);
+    const openAbove = availableBelow < 500 && availableAbove > availableBelow;
+    setPopoverStyle(openAbove
+      ? { position: "fixed", top: "auto", right: Math.max(margin, window.innerWidth - rect.right), bottom: window.innerHeight - rect.top + margin, maxHeight: Math.min(590, availableAbove) }
+      : { position: "fixed", top: rect.bottom + margin, right: Math.max(margin, window.innerWidth - rect.right), bottom: "auto", maxHeight: Math.min(590, availableBelow) });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -102,17 +119,22 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
     }
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", escape);
+    window.addEventListener("resize", positionPopover);
+    window.addEventListener("scroll", positionPopover, true);
     return () => {
       document.removeEventListener("pointerdown", close);
       document.removeEventListener("keydown", escape);
+      window.removeEventListener("resize", positionPopover);
+      window.removeEventListener("scroll", positionPopover, true);
     };
-  }, [open]);
+  }, [open, positionPopover]);
 
   function openCalendar() {
     setDraft(value);
     setActiveEndpoint(value.from && !value.to ? "to" : "from");
     setVisibleMonth(monthFromIso(value.from ?? value.to ?? today));
     setError("");
+    positionPopover();
     setOpen(true);
   }
 
@@ -168,7 +190,7 @@ export default function DateFilter({ value, onChange }: DateFilterProps) {
         <span className={`date-filter__trigger-chevron${open ? " date-filter__trigger-chevron--open" : ""}`} aria-hidden="true"><img src="/assets/icon-dropdown-path.svg" alt="" /></span>
       </button>
       {open ? (
-        <section className="date-filter__popover" role="dialog" aria-modal="false" aria-labelledby={titleId}>
+        <section className="date-filter__popover" style={popoverStyle} role="dialog" aria-modal="false" aria-labelledby={titleId}>
           <div className="date-filter__popover-heading">
             <div><span className="date-filter__eyebrow">Schedule</span><h2 id={titleId}>Date range</h2></div>
             <span className="date-filter__selection-summary">Inclusive</span>
