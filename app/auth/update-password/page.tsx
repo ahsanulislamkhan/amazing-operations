@@ -27,13 +27,13 @@ export default function UpdatePasswordPage() {
     <main className="auth-flow-shell">
       <form className="auth-flow-card" onSubmit={submit}>
         <img src="/assets/logo-wordmark.svg" alt="Amazing Operations" />
-        <p className="login-eyebrow">Secure access</p>
-        <h1>Choose a password</h1>
-        <p>Use at least 10 characters for your Operations account.</p>
+        <p className="login-eyebrow">Team invitation</p>
+        <h1>Create your account</h1>
+        <p>Choose a password to finish setting up your Amazing Operations account.</p>
         <label className="login-field"><span>New password</span><input name="password" type="password" minLength={10} autoComplete="new-password" required /></label>
         <label className="login-field"><span>Confirm password</span><input name="confirm" type="password" minLength={10} autoComplete="new-password" required /></label>
         {error ? <p className="login-error" role="alert">{error}</p> : null}
-        <button className="login-submit" type="submit" disabled={pending}>{pending ? "Saving…" : "Save password"}</button>
+        <button className="login-submit" type="submit" disabled={pending}>{pending ? "Creating account…" : "Create account"}</button>
       </form>
     </main>
   );
