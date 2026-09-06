@@ -68,10 +68,17 @@ test("seeded identifiers and linked-account safety checks are retained", async (
 
   assert.match(actionSource, /const uuid = z\.guid\(\)/);
   assert.doesNotMatch(actionSource, /deleteUser\(/);
-  assert.match(actionSource, /select\("email, status, auth_user_id"\)/);
+  assert.match(actionSource, /select\("id, email, full_name, status, auth_user_id"\)/);
   assert.match(actionSource, /staff\.auth_user_id/);
   assert.match(actionSource, /email_confirmed_at/);
-  assert.match(actionSource, /resetPasswordForEmail/);
+  assert.doesNotMatch(actionSource, /resetPasswordForEmail/);
+  assert.match(actionSource, /generateLink\(\{ type: "recovery"/);
+  assert.match(actionSource, /sendStaffAccessEmail/);
+
+  const emailSource = await readFile(new URL("../lib/email/staff-access.ts", import.meta.url), "utf8");
+  assert.match(emailSource, /amazing-operations-email-logo\.png/);
+  assert.match(emailSource, /url\.searchParams\.set\("token_hash"/);
+  assert.match(emailSource, /idempotencyKey: `staff-access/);
   assert.match(pageSource, /authUserId: staff\.authUserId/);
   assert.match(pageSource, /staffStatus: staff\.status/);
   assert.match(pageSource, /disabled=\{Boolean\(editingAdministrator\?\.authUserId\)\}/);

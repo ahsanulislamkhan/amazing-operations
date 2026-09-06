@@ -5,6 +5,7 @@ import { after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { processEmailOutbox } from "@/lib/email/outbox";
+import { sendStaffAccessEmail } from "@/lib/email/staff-access";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getAuthenticatedContext, loadOperationsSnapshot, requireManager } from "@/lib/operations/server";
 import {
@@ -244,16 +245,20 @@ async function inviteSavedStaff(
     };
   }
 
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(staff.email, {
-    data: { staff_profile_id: staff.id, full_name: staff.full_name },
-    redirectTo: await staffAccessRedirectUrl(),
+  const redirectTo = await staffAccessRedirectUrl();
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: "invite",
+    email: staff.email,
+    options: {
+      data: { staff_profile_id: staff.id, full_name: staff.full_name },
+      redirectTo,
+    },
   });
   if (error) {
     await admin.from("notifications").insert({ staff_id: managerId, event: "task_changed", title: "Staff invitation failed", body: `The invitation for ${staff.full_name} could not be sent. Open Role Management to review and retry.`, notification_key: `invitation-failed:${staff.id}:${managerId}:${new Date().toISOString().slice(0, 10)}` }).select("id");
     return { ok: false, error: staffInvitationError(error), code: error.code, retryAvailable: staffInvitationCanRetry(error), invitationSent: false };
   }
 
-  const redirectUrl = await staffAccessRedirectUrl();
   const { error: updateError } = await supabase
     .from("staff_profiles")
     .update({ auth_user_id: data.user.id, status: "invited" })
@@ -262,13 +267,24 @@ async function inviteSavedStaff(
     .single();
 
   if (!updateError) {
+    const delivery = await sendStaffAccessEmail({
+      email: staff.email,
+      name: staff.full_name,
+      redirectTo,
+      staffId: staff.id,
+      tokenHash: data.properties.hashed_token,
+      type: "invite",
+    });
+    if (!delivery.ok) {
+      return { ok: false, error: `The account was prepared, but the access email could not be sent. ${delivery.error}`, code: "EMAIL_DELIVERY_FAILED", retryAvailable: true, invitationSent: false };
+    }
     await Promise.allSettled([
       admin.from("notifications").insert({ staff_id: managerId, event: "task_changed", title: "Staff invitation sent", body: `A secure invitation has been sent to ${staff.full_name}. They can set their password from the email.` }),
       admin.from("notifications").insert({
         staff_id: staff.id,
         event: "invitation",
         title: "Welcome to Amazing Operations",
-        body: `Hi ${staff.full_name},\n\nWelcome to Amazing Operations. Your account has been created.\n\nPlease set your password using this link:\n${redirectUrl}\n\nAfter setting your password, sign in to view your assigned tasks.`,
+        body: `Hi ${staff.full_name},\n\nWelcome to Amazing Operations. A secure account setup email has been sent to ${staff.email}.`,
       }),
     ]);
     return { ok: true };
@@ -421,8 +437,11 @@ export async function inviteStaffAction(staffIdValue: unknown): Promise<ActionRe
     if (authData.user.email_confirmed_at) {
       const { error: stateError } = await context.data.supabase.from("staff_profiles").update({ status: "invited" }).eq("id", staff.id);
       if (stateError) return { ok: false, error: "The staff profile could not be prepared for password recovery.", code: stateError.code };
-      const { error: resetError } = await context.data.supabase.auth.resetPasswordForEmail(staff.email, { redirectTo: await staffAccessRedirectUrl() });
-      if (resetError) return { ok: false, error: resetError.message, code: resetError.code };
+      const redirectTo = await staffAccessRedirectUrl();
+      const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({ type: "recovery", email: staff.email, options: { redirectTo } });
+      if (linkError || !linkData.properties) return { ok: false, error: linkError?.message ?? "The access link could not be created.", code: linkError?.code };
+      const delivery = await sendStaffAccessEmail({ email: staff.email, name: staff.full_name, redirectTo, staffId: staff.id, tokenHash: linkData.properties.hashed_token, type: "recovery" });
+      if (!delivery.ok) return { ok: false, error: delivery.error, code: "EMAIL_DELIVERY_FAILED" };
       return refreshAfterMutation();
     }
   }
@@ -439,7 +458,7 @@ export async function sendStaffPasswordResetAction(staffIdValue: unknown): Promi
   if (!context.ok) return context;
   const { data: staff, error } = await context.data.supabase
     .from("staff_profiles")
-    .select("email, status, auth_user_id")
+    .select("id, email, full_name, status, auth_user_id")
     .eq("id", parsed.data)
     .single();
   if (error || !staff) return { ok: false, error: "Staff member not found.", code: error?.code };
@@ -460,8 +479,11 @@ export async function sendStaffPasswordResetAction(staffIdValue: unknown): Promi
     return { ok: false, error: "The staff email does not match the linked Supabase login. Correct the member record before sending a reset.", code: "AUTH_EMAIL_MISMATCH" };
   }
 
-  const { error: resetError } = await context.data.supabase.auth.resetPasswordForEmail(staff.email, { redirectTo: await staffAccessRedirectUrl() });
-  if (resetError) return { ok: false, error: resetError.message, code: resetError.code };
+  const redirectTo = await staffAccessRedirectUrl();
+  const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({ type: "recovery", email: staff.email, options: { redirectTo } });
+  if (linkError || !linkData.properties) return { ok: false, error: linkError?.message ?? "The password link could not be created.", code: linkError?.code };
+  const delivery = await sendStaffAccessEmail({ email: staff.email, name: staff.full_name, redirectTo, staffId: staff.id, tokenHash: linkData.properties.hashed_token, type: "recovery" });
+  if (!delivery.ok) return { ok: false, error: delivery.error, code: "EMAIL_DELIVERY_FAILED" };
   return refreshAfterMutation();
 }
 
