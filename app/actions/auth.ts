@@ -45,12 +45,30 @@ export async function requestPasswordResetAction(emailValue: unknown): Promise<A
   return { ok: true, data: undefined };
 }
 
-export async function updatePasswordAction(passwordValue: unknown): Promise<ActionResult> {
-  const parsed = z.string().min(10, "Use at least 10 characters.").max(1024).safeParse(passwordValue);
+const passwordSetupSchema = z.object({
+  password: z.string().min(10, "Use at least 10 characters.").max(1024),
+  tokenHash: z.string().min(1).optional(),
+  type: z.enum(["invite", "recovery"]).optional(),
+});
+
+export async function updatePasswordAction(input: unknown): Promise<ActionResult> {
+  const parsed = passwordSetupSchema.safeParse(typeof input === "string" ? { password: input } : input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Enter a stronger password.", code: "INVALID_INPUT" };
+  if (Boolean(parsed.data.tokenHash) !== Boolean(parsed.data.type)) {
+    return { ok: false, error: "This password link is incomplete. Ask your manager for a new email.", code: "INVALID_LINK" };
+  }
   const supabase = await createSupabaseServerClient();
   if (!supabase) return { ok: false, error: "Operations authentication has not been configured yet.", code: "NOT_CONFIGURED" };
-  const { error } = await supabase.auth.updateUser({ password: parsed.data });
+
+  if (parsed.data.tokenHash && parsed.data.type) {
+    const { error: verificationError } = await supabase.auth.verifyOtp({
+      token_hash: parsed.data.tokenHash,
+      type: parsed.data.type,
+    });
+    if (verificationError) return { ok: false, error: "This password link has expired or was already used. Ask your manager for a new email.", code: verificationError.code };
+  }
+
+  const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
   if (error) return { ok: false, error: error.message, code: error.code };
   const { error: activationError } = await supabase.rpc("activate_invited_profile");
   if (activationError) return { ok: false, error: activationError.message, code: activationError.code };

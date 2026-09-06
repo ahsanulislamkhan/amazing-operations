@@ -25,6 +25,9 @@ function escapeHtml(value: string) {
 
 export function staffAccessUrl(redirectTo: string, tokenHash: string, type: StaffAccessType) {
   const url = new URL(redirectTo);
+  url.pathname = "/auth/update-password";
+  url.search = "";
+  url.hash = "";
   url.searchParams.set("token_hash", tokenHash);
   url.searchParams.set("type", type);
   return url.toString();

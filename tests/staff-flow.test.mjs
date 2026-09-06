@@ -78,6 +78,7 @@ test("seeded identifiers and linked-account safety checks are retained", async (
   const emailSource = await readFile(new URL("../lib/email/staff-access.ts", import.meta.url), "utf8");
   assert.match(emailSource, /amazing-operations-email-logo\.png/);
   assert.match(emailSource, /url\.searchParams\.set\("token_hash"/);
+  assert.match(emailSource, /url\.pathname = "\/auth\/update-password"/);
   assert.match(emailSource, /idempotencyKey: `staff-access/);
   assert.match(pageSource, /authUserId: staff\.authUserId/);
   assert.match(pageSource, /staffStatus: staff\.status/);

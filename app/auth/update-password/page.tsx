@@ -17,7 +17,12 @@ export default function UpdatePasswordPage() {
       return;
     }
     setPending(true);
-    const result = await updatePasswordAction(password);
+    const query = new URLSearchParams(window.location.search);
+    const result = await updatePasswordAction({
+      password,
+      tokenHash: query.get("token_hash") || undefined,
+      type: query.get("type") || undefined,
+    });
     setPending(false);
     if (!result.ok) { setError(result.error); return; }
     router.replace("/");
