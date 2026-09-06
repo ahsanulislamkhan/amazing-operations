@@ -253,6 +253,7 @@ async function inviteSavedStaff(
     return { ok: false, error: staffInvitationError(error), code: error.code, retryAvailable: staffInvitationCanRetry(error), invitationSent: false };
   }
 
+  const redirectUrl = await staffAccessRedirectUrl();
   const { error: updateError } = await supabase
     .from("staff_profiles")
     .update({ auth_user_id: data.user.id, status: "invited" })
@@ -261,7 +262,15 @@ async function inviteSavedStaff(
     .single();
 
   if (!updateError) {
-    await admin.from("notifications").insert({ staff_id: managerId, event: "task_changed", title: "Staff invitation sent", body: `A secure invitation has been sent to ${staff.full_name}. They can set their password from the email.` });
+    await Promise.allSettled([
+      admin.from("notifications").insert({ staff_id: managerId, event: "task_changed", title: "Staff invitation sent", body: `A secure invitation has been sent to ${staff.full_name}. They can set their password from the email.` }),
+      admin.from("notifications").insert({
+        staff_id: staff.id,
+        event: "invitation",
+        title: "Welcome to Amazing Operations",
+        body: `Hi ${staff.full_name},\n\nWelcome to Amazing Operations. Your account has been created.\n\nPlease set your password using this link:\n${redirectUrl}\n\nAfter setting your password, sign in to view your assigned tasks.`,
+      }),
+    ]);
     return { ok: true };
   }
 

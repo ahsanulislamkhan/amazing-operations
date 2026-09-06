@@ -23,9 +23,17 @@ function escapeHtml(value: unknown) {
 function emailHtml(payload: Record<string, unknown>) {
   const name = escapeHtml(payload.name || "Operations team member");
   const title = escapeHtml(payload.title || "Operations update");
-  const body = escapeHtml(payload.body || "There is a new update in Amazing Operations.");
   const appUrl = escapeHtml(process.env.NEXT_PUBLIC_APP_URL || "https://amazing-operations-dashboard.vercel.app");
-  return `<!doctype html><html><body style="margin:0;background:#f4f5f6;font-family:Arial,sans-serif;color:#020617"><div style="max-width:620px;margin:32px auto;background:#fff;border-radius:24px;padding:36px"><img src="${appUrl}/assets/logo-wordmark.svg" width="210" alt="Amazing Operations"><p style="color:#0bacf0;font-weight:700;margin-top:34px">Operations update</p><h1 style="font-size:28px;margin:8px 0 16px">${title}</h1><p style="line-height:1.6">Hi ${name},</p><p style="line-height:1.6">${body}</p><a href="${appUrl}" style="display:inline-block;margin-top:18px;background:#0bacf0;color:#fff;text-decoration:none;padding:14px 24px;border-radius:999px">Open Operations</a><p style="margin-top:36px;color:#64748b;font-size:13px">Amazing Tiles Operations</p></div></body></html>`;
+  const bodyText = String(payload.body || "There is a new update in Amazing Operations.");
+  const actionUrlCandidate = typeof payload.actionUrl === "string" ? payload.actionUrl.trim() : "";
+  const actionLabel = typeof payload.actionLabel === "string" && payload.actionLabel.trim() ? payload.actionLabel.trim() : /set your password/i.test(bodyText) ? "Set your password" : "Open Operations";
+  const actionUrlFromBody = bodyText.match(/https?:\/\/[^\s<>"'`]+/)?.[0] ?? "";
+  const actionUrl = actionUrlCandidate || actionUrlFromBody || appUrl;
+  const paragraphs = bodyText
+    .split(/\r?\n\r?\n/)
+    .map((paragraph) => `<p style="line-height:1.6; margin: 0 0 14px;">${escapeHtml(paragraph.trim()).replaceAll("\n", "<br>")}</p>`)
+    .join("");
+  return `<!doctype html><html><body style="margin:0;background:#f4f5f6;font-family:Arial,sans-serif;color:#020617"><div style="max-width:620px;margin:32px auto;background:#fff;border-radius:24px;padding:36px"><img src="${appUrl}/assets/logo-wordmark.svg" width="210" alt="Amazing Operations"><p style="color:#0bacf0;font-weight:700;margin-top:34px">Operations update</p><h1 style="font-size:28px;margin:8px 0 16px">${title}</h1><p style="line-height:1.6">Hi ${name},</p>${paragraphs}<a href="${escapeHtml(actionUrl)}" style="display:inline-block;margin-top:18px;background:#0bacf0;color:#fff;text-decoration:none;padding:14px 24px;border-radius:999px">${escapeHtml(actionLabel)}</a><p style="margin-top:36px;color:#64748b;font-size:13px">Amazing Tiles Operations</p></div></body></html>`;
 }
 
 export async function processEmailOutbox(batchSize = 20) {
